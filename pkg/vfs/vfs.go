@@ -1,4 +1,4 @@
-package kube
+package vfs
 
 import (
 	"context"
@@ -21,7 +21,8 @@ const (
 
 // Only var because this can't be a const
 var (
-	ChunkLabel = labels.SelectorFromSet(map[string]string{"data": "chunk"}).String()
+	ChunkLabel     = map[string]string{"data": "chunk"}
+	NamespaceLabel = map[string]string{"kube-sqlite3-vfs": "used"}
 )
 
 type vfs struct {
@@ -40,15 +41,15 @@ func (f *file) namespaceName() string {
 
 func (f *file) b32ByteFromString(s string) []byte {
 	sb := []byte(s)
-	dst := make([]byte, base32.StdEncoding.EncodedLen(len(sb)))
-	base32.StdEncoding.Encode(dst, sb)
+	dst := make([]byte, f.encoding.EncodedLen(len(sb)))
+	f.encoding.Encode(dst, sb)
 	return dst
 }
 
 func (f *file) stringFromB32Byte(b []byte) (string, error) {
 
-	dst := make([]byte, base32.StdEncoding.DecodedLen(len(b)))
-	n, err := base32.StdEncoding.Decode(dst, b)
+	dst := make([]byte, f.encoding.DecodedLen(len(b)))
+	n, err := f.encoding.Decode(dst, b)
 	if err != nil {
 		f.vfs.logger.Errorw("decode error:", "error", err)
 		return "", err
@@ -70,22 +71,24 @@ func (f *file) Truncate(size int64) error {
 
 func (f *file) FileSize() (int64, error) {
 	// TODO, get the number of matching data configmaps, and return that numer * 64k
-	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: ChunkLabel})
+	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(ChunkLabel).String()})
 	if err != nil {
 		return 0, nil
 	}
-	fSize := int64(len(cms.Items)) * ChunkSize
+	// Removing 1 as the lock doesn't count
+	fSize := int64(len(cms.Items)-1) * ChunkSize
 	return fSize, nil
 }
 
 // TODO, actually create the file object during Open
 type file struct {
-	dataRowKey string
-	rawName    string
-	randID     string
+	// dataRowKey string
+	rawName string
+	// randID     string
 	sectorSize int64
-	closed     bool
-	vfs        *vfs
+	// closed     bool
+	vfs      *vfs
+	encoding *base32.Encoding
 
 	// lockManager lockManager
 }
@@ -126,18 +129,24 @@ func (f *file) DeviceCharacteristics() sqlite3vfs.DeviceCharacteristic {
 	return sqlite3vfs.IocapAtomic64K
 }
 
+func newFile(name string, v *vfs) *file {
+	o := base32.NewEncoding("abcdefghijklmnopqrstuv0123456789")
+	e := o.WithPadding('x')
+	return &file{rawName: name, vfs: v, encoding: e}
+}
+
 func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sqlite3vfs.OpenFlag, error) {
 	// in case we're racing another client
 	for i := 0; i < 100; i++ {
 		// Check if namespace and lockfile already exist.
 		// If they don't, create them
 		// if this fails, return readonlyfs
-		
-		f := &file{rawName: "name", vfs :v}
+
+		f := newFile(name, v)
 		_, err := v.kc.CoreV1().Namespaces().Get(context.TODO(), f.namespaceName(), metav1.GetOptions{})
 		if kerrors.IsNotFound(err) {
 			// Create namespace
-			ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.namespaceName()}}
+			ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.namespaceName(), Labels: NamespaceLabel}}
 			_, err := v.kc.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{})
 			if err != nil {
 				v.logger.Error(err)
@@ -151,7 +160,7 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		// Now check for lock file
 		_, err = f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), LockFileName, metav1.GetOptions{})
 		if kerrors.IsNotFound(err) {
-			lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName}}
+			lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: ChunkLabel}}
 			_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
 			if err != nil {
 				f.vfs.logger.Error(err)
@@ -168,7 +177,7 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 
 func (v *vfs) Delete(name string, dirSync bool) error {
 	// in case we're racing another client
-	f := file{rawName: "name", vfs :v}
+	f := newFile(name, v)
 	for i := 0; i < 100; i++ {
 		err := f.vfs.kc.CoreV1().Namespaces().Delete(context.TODO(), f.namespaceName(), metav1.DeleteOptions{})
 		f.vfs.logger.Error(err)

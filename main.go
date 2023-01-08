@@ -3,9 +3,9 @@ package main
 import (
 	"database/sql"
 	"log"
+	"path/filepath"
 
-	"github.com/RichardoC/kube-sqlite3-vfs/pkg/kube"
-	
+	"github.com/RichardoC/kube-sqlite3-vfs/pkg/vfs"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/psanford/sqlite3vfs"
 	"github.com/thought-machine/go-flags"
@@ -13,10 +13,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
 )
 
 type Options struct {
-	KubeConfig string `long:"kubeconfig" description:"kubeconfig location"`
+	KubeConfig string `long:"kubeconfig" description:"(optional) absolute path to the kubeconfig file"`
 	Verbose    bool   `long:"verbosity" short:"v" description:"Uses zap Development default verbose mode rather than production"`
 }
 
@@ -52,16 +53,16 @@ func main() {
 	undo := zap.RedirectStdLog(lg)
 	defer undo()
 
-	var kubeconfig *string
-	// if home := homedir.HomeDir(); home != "" {
-	// 	kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
-	// } else {
-	// 	kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
-	// }
-	// flag.Parse()
+	var kubeconfig string
+	if opts.KubeConfig != "" {
+		kubeconfig = opts.KubeConfig
+	} else if home := homedir.HomeDir(); home != "" {
+		kubeconfig = filepath.Join(home, ".kube", "config")
+
+	}
 
 	// use the current context in kubeconfig
-	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -72,13 +73,13 @@ func main() {
 		panic(err.Error())
 	}
 
-	vfs := kube.NewVFS(clientset, logger)
+	vfs := vfs.NewVFS(clientset, logger)
 
 	// register the custom donutdb vfs with sqlite
 	// the name specifed here must match the `vfs` param
 	// passed to sql.Open in the dataSourceName:
 	// e.g. `...?vfs=donutdb`
-	err = sqlite3vfs.RegisterVFS("kube-vfs", vfs)
+	err = sqlite3vfs.RegisterVFS("kube-sqlite3-vfs", vfs)
 	if err != nil {
 		logger.Fatalw("Failed to Register VFS", "error", err)
 	}
@@ -87,7 +88,7 @@ func main() {
 	// you can have multiple db files stored in a single dynamodb table
 	// The `vfs=donutdb` instructs sqlite to use the custom vfs implementation.
 	// The name must match the name passed to `sqlite3vfs.RegisterVFS`
-	db, err := sql.Open("sqlite3", "file0.db?vfs=donutdb")
+	db, err := sql.Open("sqlite3", "file0.db?vfs=kube-sqlite3-vfs")
 	if err != nil {
 		panic(err)
 	}
