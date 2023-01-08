@@ -22,6 +22,7 @@ const (
 // Only var because this can't be a const
 var (
 	ChunkLabel     = map[string]string{"data": "chunk"}
+	LockfileLabel  = map[string]string{"data": "lockfile"}
 	NamespaceLabel = map[string]string{"kube-sqlite3-vfs": "used"}
 )
 
@@ -75,8 +76,7 @@ func (f *file) FileSize() (int64, error) {
 	if err != nil {
 		return 0, nil
 	}
-	// Removing 1 as the lock doesn't count
-	fSize := int64(len(cms.Items)-1) * ChunkSize
+	fSize := int64(len(cms.Items)) * ChunkSize
 	return fSize, nil
 }
 
