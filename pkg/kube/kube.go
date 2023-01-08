@@ -25,50 +25,52 @@ var (
 )
 
 type vfs struct {
-	kc      *kubernetes.Clientset
-	file    string // actually the namespace?
-	table   string
-	ownerID string
-	logger  *zap.SugaredLogger
+	kc *kubernetes.Clientset
+	// file   string // actually the namespace?
+	logger *zap.SugaredLogger
 }
 
-func (v *vfs) namespaceName() string {
-	return string(v.b32ByteFromString(v.file))
+func NewVFS(kc *kubernetes.Clientset, logger *zap.SugaredLogger) vfs {
+	return vfs{kc: kc, logger: logger}
 }
 
-func (v *vfs) b32ByteFromString(s string) []byte {
+func (f *file) namespaceName() string {
+	return string(f.b32ByteFromString(f.rawName))
+}
+
+func (f *file) b32ByteFromString(s string) []byte {
 	sb := []byte(s)
 	dst := make([]byte, base32.StdEncoding.EncodedLen(len(sb)))
 	base32.StdEncoding.Encode(dst, sb)
 	return dst
 }
 
-func (v *vfs) stringFromB32Byte(b []byte) (string, error) {
+func (f *file) stringFromB32Byte(b []byte) (string, error) {
 
 	dst := make([]byte, base32.StdEncoding.DecodedLen(len(b)))
 	n, err := base32.StdEncoding.Decode(dst, b)
 	if err != nil {
-		v.logger.Errorw("decode error:", "error", err)
+		f.vfs.logger.Errorw("decode error:", "error", err)
 		return "", err
 	}
 	dst = dst[:n]
 	return string(dst), err
 }
 
-func (v *vfs) Close() error {
+func (f *file) Close() error {
 	// TODO, remove locks/etc
 	return nil
 }
 
-func (v *vfs) Truncate(size int64) error {
+func (f *file) Truncate(size int64) error {
 	// TODO, remove any cms with a number higher than the next chunk
 	// then remove the last bit of the previous chunk
 	return nil
 }
 
-func (v *vfs) FileSize() (int64, error) {
+func (f *file) FileSize() (int64, error) {
 	// TODO, get the number of matching data configmaps, and return that numer * 64k
-	cms, err := v.kc.CoreV1().ConfigMaps(v.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: ChunkLabel})
+	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: ChunkLabel})
 	if err != nil {
 		return 0, nil
 	}
@@ -76,40 +78,51 @@ func (v *vfs) FileSize() (int64, error) {
 	return fSize, nil
 }
 
-func (v *vfs) ReadAt(p []byte, off int64) (n int, err error) {
+// TODO, actually create the file object during Open
+type file struct {
+	dataRowKey string
+	rawName    string
+	randID     string
+	sectorSize int64
+	closed     bool
+	vfs        *vfs
+
+	// lockManager lockManager
+}
+
+func (f *file) ReadAt(p []byte, off int64) (n int, err error) {
 	// TODO, work out which chunks we need, and which bytes from those
 	// then have other functions to do those directly
 	// and then cat together and return
-
+	return 0, sqlite3vfs.BusyError
 }
 
-func (v *vfs) WriteAt(p []byte, off int64) (n int, err error) {
-
+func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
+	return 0, sqlite3vfs.BusyError
 }
-
 
 // Sync noops as we're doing the writes directly
-func (v *vfs) Sync(flag sqlite3vfs.SyncType) error {
+func (f *file) Sync(flag sqlite3vfs.SyncType) error {
 	return nil
 }
 
 // TODO actually have a lock configmap with whatever's needed
-func (v *vfs) Lock(elock sqlite3vfs.LockType) error {
+func (f *file) Lock(elock sqlite3vfs.LockType) error {
 	return nil
 }
 
-func (v *vfs) Unlock(elock sqlite3vfs.LockType) error {
+func (f *file) Unlock(elock sqlite3vfs.LockType) error {
 	return nil
 }
 
-func (v *vfs) SectorSize() int64 {
+func (f *file) SectorSize() int64 {
 	// 64k as we're considering each chunk as a sector
 	return ChunkSize
 }
 
 // DeviceCharacteristics
 // We'll target 64K per configmap
-func (v *vfs) DeviceCharacteristics() sqlite3vfs.DeviceCharacteristic {
+func (f *file) DeviceCharacteristics() sqlite3vfs.DeviceCharacteristic {
 	return sqlite3vfs.IocapAtomic64K
 }
 
@@ -119,31 +132,33 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		// Check if namespace and lockfile already exist.
 		// If they don't, create them
 		// if this fails, return readonlyfs
-		_, err := v.kc.CoreV1().Namespaces().Get(context.TODO(), v.namespaceName(), metav1.GetOptions{})
+		
+		f := &file{rawName: "name", vfs :v}
+		_, err := v.kc.CoreV1().Namespaces().Get(context.TODO(), f.namespaceName(), metav1.GetOptions{})
 		if kerrors.IsNotFound(err) {
 			// Create namespace
-			ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: v.namespaceName()}}
+			ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.namespaceName()}}
 			_, err := v.kc.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{})
 			if err != nil {
 				v.logger.Error(err)
 				continue
 			}
 		} else if err != nil {
-			v.logger.Error(err)
+			f.vfs.logger.Error(err)
 			continue
 		}
 
 		// Now check for lock file
-		_, err = v.kc.CoreV1().ConfigMaps(v.namespaceName()).Get(context.TODO(), LockFileName, metav1.GetOptions{})
+		_, err = f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), LockFileName, metav1.GetOptions{})
 		if kerrors.IsNotFound(err) {
 			lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName}}
-			_, err := v.kc.CoreV1().ConfigMaps(v.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
+			_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
 			if err != nil {
-				v.logger.Error(err)
+				f.vfs.logger.Error(err)
 				continue
 			}
 		}
-		return v, flags, nil
+		return f, flags, nil
 
 	}
 
@@ -153,12 +168,13 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 
 func (v *vfs) Delete(name string, dirSync bool) error {
 	// in case we're racing another client
+	f := file{rawName: "name", vfs :v}
 	for i := 0; i < 100; i++ {
-		err := v.kc.CoreV1().Namespaces().Delete(context.TODO(), v.namespaceName(), metav1.DeleteOptions{})
-		v.logger.Error(err)
+		err := f.vfs.kc.CoreV1().Namespaces().Delete(context.TODO(), f.namespaceName(), metav1.DeleteOptions{})
+		f.vfs.logger.Error(err)
 		return sqlite3vfs.IOError
 	}
-	v.logger.Errorw("Failed to delete file", "filename", name, "dirSync", dirSync)
+	f.vfs.logger.Errorw("Failed to delete file", "filename", name, "dirSync", dirSync)
 	return sqlite3vfs.IOError
 }
 
@@ -176,6 +192,6 @@ func (v *vfs) FullPathname(name string) string {
 
 // CheckReservedLock
 // TODO actually fulfil this
-func (v *vfs) CheckReservedLock() (bool, error) {
+func (f *file) CheckReservedLock() (bool, error) {
 	return false, nil
 }

@@ -1,3 +1,6 @@
+# Binary
+kube-sqlite3-vfs
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
