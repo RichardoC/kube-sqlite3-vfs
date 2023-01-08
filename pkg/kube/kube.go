@@ -30,8 +30,8 @@ type vfs struct {
 	logger *zap.SugaredLogger
 }
 
-func NewVFS(kc *kubernetes.Clientset, logger *zap.SugaredLogger) vfs {
-	return vfs{kc: kc, logger: logger}
+func NewVFS(kc *kubernetes.Clientset, logger *zap.SugaredLogger) *vfs {
+	return &vfs{kc: kc, logger: logger}
 }
 
 func (f *file) namespaceName() string {
