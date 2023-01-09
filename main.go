@@ -19,6 +19,7 @@ import (
 type Options struct {
 	KubeConfig string `long:"kubeconfig" description:"(optional) absolute path to the kubeconfig file"`
 	Verbose    bool   `long:"verbosity" short:"v" description:"Uses zap Development default verbose mode rather than production"`
+	Retries    int    `long:"retries" description:"Number of retries for API calls"`
 }
 
 func main() {
@@ -53,6 +54,8 @@ func main() {
 	undo := zap.RedirectStdLog(lg)
 	defer undo()
 
+	logger.Infow("Got config", "opts", opts)
+
 	var kubeconfig string
 	if opts.KubeConfig != "" {
 		kubeconfig = opts.KubeConfig
@@ -64,16 +67,16 @@ func main() {
 	// use the current context in kubeconfig
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
-		panic(err.Error())
+		log.Fatal(err)
 	}
 
 	// create the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		panic(err.Error())
+		log.Fatal(err)
 	}
 
-	vfs := vfs.NewVFS(clientset, logger)
+	vfs := vfs.NewVFS(clientset, logger, opts.Retries)
 
 	// register the custom donutdb vfs with sqlite
 	// the name specifed here must match the `vfs` param
@@ -90,7 +93,7 @@ func main() {
 	// The name must match the name passed to `sqlite3vfs.RegisterVFS`
 	db, err := sql.Open("sqlite3", "file0.db?vfs=kube-sqlite3-vfs")
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer db.Close()
 
@@ -99,20 +102,21 @@ id text NOT NULL PRIMARY KEY,
 title text
 )`)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	_, err = db.Exec(`INSERT INTO foo (id, title) values (?, ?)`, "developer-arbitration", "washroom-whitecap")
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	var gotID, gotTitle string
 	row := db.QueryRow("SELECT id, title FROM foo where id = ?", "developer-arbitration")
 	err = row.Scan(&gotID, &gotTitle)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	logger.Infof("got: id=%s title=%s", gotID, gotTitle)
+	
 }

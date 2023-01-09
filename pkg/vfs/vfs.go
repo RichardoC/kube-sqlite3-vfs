@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base32"
 	"errors"
+	"io"
 
 	"github.com/psanford/sqlite3vfs"
 	"go.uber.org/zap"
@@ -16,12 +17,12 @@ import (
 
 const (
 	LockFileName = "lockfile"
-	ChunkSize    = 64 * 1024
+	SectorSize   = 64 * 1024
 )
 
 // Only var because this can't be a const
 var (
-	ChunkLabel     = map[string]string{"data": "chunk"}
+	SectorLabel    = map[string]string{"data": "sector"}
 	LockfileLabel  = map[string]string{"data": "lockfile"}
 	NamespaceLabel = map[string]string{"kube-sqlite3-vfs": "used"}
 )
@@ -29,11 +30,12 @@ var (
 type vfs struct {
 	kc *kubernetes.Clientset
 	// file   string // actually the namespace?
-	logger *zap.SugaredLogger
+	logger  *zap.SugaredLogger
+	retries int
 }
 
-func NewVFS(kc *kubernetes.Clientset, logger *zap.SugaredLogger) *vfs {
-	return &vfs{kc: kc, logger: logger}
+func NewVFS(kc *kubernetes.Clientset, logger *zap.SugaredLogger, retries int) *vfs {
+	return &vfs{kc: kc, logger: logger, retries: retries}
 }
 
 func (f *file) namespaceName() string {
@@ -65,27 +67,25 @@ func (f *file) Close() error {
 }
 
 func (f *file) Truncate(size int64) error {
-	// TODO, remove any cms with a number higher than the next chunk
-	// then remove the last bit of the previous chunk
+	// TODO, remove any cms with a number higher than the next sector
+	// then remove the last bit of the previous sector
 	return nil
 }
 
 func (f *file) FileSize() (int64, error) {
 	// TODO, get the number of matching data configmaps, and return that numer * 64k
-	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(ChunkLabel).String()})
+	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(SectorLabel).String()})
 	if err != nil {
 		return 0, nil
 	}
-	fSize := int64(len(cms.Items)) * ChunkSize
+	fSize := int64(len(cms.Items)) * SectorSize
 	return fSize, nil
 }
 
-// TODO, actually create the file object during Open
 type file struct {
 	// dataRowKey string
 	rawName string
 	// randID     string
-	sectorSize int64
 	// closed     bool
 	vfs      *vfs
 	encoding *base32.Encoding
@@ -93,11 +93,50 @@ type file struct {
 	// lockManager lockManager
 }
 
-func (f *file) ReadAt(p []byte, off int64) (n int, err error) {
-	// TODO, work out which chunks we need, and which bytes from those
-	// then have other functions to do those directly
-	// and then cat together and return
-	return 0, sqlite3vfs.BusyError
+func (f *file) sectorForPos(pos int64) int64 {
+	return pos - (pos % SectorSize)
+}
+
+func (f *file) ReadAt(p []byte, off int64) (int, error) {
+	// if f.closed {
+	// 	return 0, os.ErrClosed
+	// }
+
+	firstSector := f.sectorForPos(off)
+
+	fileSize, err := f.FileSize()
+	if err != nil {
+		return 0, err
+	}
+
+	lastByte := off + int64(len(p)) - 1
+
+	lastSector := f.sectorForPos(lastByte)
+
+	var (
+		n     int
+		first = true
+	)
+	sectors, err := f.getSectorRange(firstSector, lastSector)
+	if err != nil {
+		return 0, sqlite3vfs.IOErrorRead
+	}
+	for _, sect := range sectors {
+		if first {
+			startIndex := off % SectorSize
+			n = copy(p, sect.data[startIndex:])
+			first = false
+			continue
+		}
+
+		nn := copy(p[n:], sect.data)
+		n += nn
+	}
+	if lastByte >= fileSize {
+		return n, io.EOF
+	}
+
+	return n, nil
 }
 
 func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
@@ -119,8 +158,8 @@ func (f *file) Unlock(elock sqlite3vfs.LockType) error {
 }
 
 func (f *file) SectorSize() int64 {
-	// 64k as we're considering each chunk as a sector
-	return ChunkSize
+	// 64k as we're considering each sector
+	return SectorSize
 }
 
 // DeviceCharacteristics
@@ -137,7 +176,7 @@ func newFile(name string, v *vfs) *file {
 
 func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sqlite3vfs.OpenFlag, error) {
 	// in case we're racing another client
-	for i := 0; i < 100; i++ {
+	for i := 0; i < v.retries; i++ {
 		// Check if namespace and lockfile already exist.
 		// If they don't, create them
 		// if this fails, return readonlyfs
@@ -160,7 +199,7 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		// Now check for lock file
 		_, err = f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), LockFileName, metav1.GetOptions{})
 		if kerrors.IsNotFound(err) {
-			lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: ChunkLabel}}
+			lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: SectorLabel}}
 			_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
 			if err != nil {
 				f.vfs.logger.Error(err)
