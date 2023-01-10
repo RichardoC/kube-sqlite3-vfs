@@ -11,7 +11,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -48,17 +47,22 @@ func (f *file) b32ByteFromString(s string) []byte {
 	f.encoding.Encode(dst, sb)
 	return dst
 }
+func (f *file) b32ByteFromBytes(s []byte) []byte {
+	dst := make([]byte, f.encoding.EncodedLen(len(s)))
+	f.encoding.Encode(dst, s)
+	return dst
+}
 
-func (f *file) stringFromB32Byte(b []byte) (string, error) {
+func (f *file) bytesFromB32Byte(b []byte) ([]byte, error) {
 
 	dst := make([]byte, f.encoding.DecodedLen(len(b)))
 	n, err := f.encoding.Decode(dst, b)
 	if err != nil {
 		f.vfs.logger.Errorw("decode error:", "error", err)
-		return "", err
+		return []byte{}, err
 	}
 	dst = dst[:n]
-	return string(dst), err
+	return dst, err
 }
 
 func (f *file) Close() error {
@@ -67,19 +71,48 @@ func (f *file) Close() error {
 }
 
 func (f *file) Truncate(size int64) error {
-	// TODO, remove any cms with a number higher than the next sector
-	// then remove the last bit of the previous sector
+
+	fileSize, err := f.FileSize()
+	if err != nil {
+		return err
+	}
+
+	if size >= fileSize {
+		return nil
+	}
+
+	lastRemainingSector := f.sectorForPos(size)
+
+	sect, err := f.getSector(lastRemainingSector)
+	if err != nil {
+		return err
+	}
+
+	sect.data = sect.data[:size%SectorSize]
+
+	f.writeSector(sect)
+
+	lastSector := f.sectorForPos(fileSize)
+
+	for sectToDelete := lastRemainingSector; sectToDelete <= lastSector; sectToDelete += 1 {
+		err := f.deleteSector(sectToDelete)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (f *file) FileSize() (int64, error) {
-	// TODO, get the number of matching data configmaps, and return that numer * 64k
-	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(SectorLabel).String()})
+	lastcm, err := f.getLastSector()
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
-	fSize := int64(len(cms.Items)) * SectorSize
-	return fSize, nil
+	// Could have an off by one error
+	size := lastcm.offset*f.SectorSize() + int64(len(lastcm.data))
+	return size, nil
+
 }
 
 type file struct {
@@ -91,10 +124,6 @@ type file struct {
 	encoding *base32.Encoding
 
 	// lockManager lockManager
-}
-
-func (f *file) sectorForPos(pos int64) int64 {
-	return pos - (pos % SectorSize)
 }
 
 func (f *file) ReadAt(p []byte, off int64) (int, error) {
@@ -140,6 +169,7 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 }
 
 func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
+
 	return 0, sqlite3vfs.BusyError
 }
 
@@ -199,7 +229,7 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		// Now check for lock file
 		_, err = f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), LockFileName, metav1.GetOptions{})
 		if kerrors.IsNotFound(err) {
-			lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: SectorLabel}}
+			lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}}
 			_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
 			if err != nil {
 				f.vfs.logger.Error(err)

@@ -27,7 +27,7 @@ func main() {
 	parser := flags.NewParser(&opts, flags.Default)
 	_, err := parser.Parse()
 	if err != nil {
-		log.Fatalf("can't parse flags: %v", err)
+		log.Panicf("can't parse flags: %v", err)
 	}
 
 	var lg *zap.Logger
@@ -36,12 +36,12 @@ func main() {
 	if opts.Verbose {
 		lg, err = zap.NewDevelopment()
 		if err != nil {
-			log.Fatalf("can't initialize zap logger: %v", err)
+			log.Panicf("can't initialize zap logger: %v", err)
 		}
 	} else {
 		lg, err = zap.NewProduction()
 		if err != nil {
-			log.Fatalf("can't initialize zap logger: %v", err)
+			log.Panicf("can't initialize zap logger: %v", err)
 		}
 
 	}
@@ -67,13 +67,13 @@ func main() {
 	// use the current context in kubeconfig
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
-		log.Fatal(err)
+		logger.Panic(err)
 	}
 
 	// create the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		log.Fatal(err)
+		logger.Panic(err)
 	}
 
 	vfs := vfs.NewVFS(clientset, logger, opts.Retries)
@@ -84,7 +84,7 @@ func main() {
 	// e.g. `...?vfs=donutdb`
 	err = sqlite3vfs.RegisterVFS("kube-sqlite3-vfs", vfs)
 	if err != nil {
-		logger.Fatalw("Failed to Register VFS", "error", err)
+		logger.Panicw("Failed to Register VFS", "error", err)
 	}
 
 	// file0 is the name of the file stored in dynamodb
@@ -93,7 +93,7 @@ func main() {
 	// The name must match the name passed to `sqlite3vfs.RegisterVFS`
 	db, err := sql.Open("sqlite3", "file0.db?vfs=kube-sqlite3-vfs")
 	if err != nil {
-		log.Fatal(err)
+		logger.Panic(err)
 	}
 	defer db.Close()
 
@@ -102,21 +102,21 @@ id text NOT NULL PRIMARY KEY,
 title text
 )`)
 	if err != nil {
-		log.Fatal(err)
+		logger.Panic(err)
 	}
 
 	_, err = db.Exec(`INSERT INTO foo (id, title) values (?, ?)`, "developer-arbitration", "washroom-whitecap")
 	if err != nil {
-		log.Fatal(err)
+		logger.Panic(err)
 	}
 
 	var gotID, gotTitle string
 	row := db.QueryRow("SELECT id, title FROM foo where id = ?", "developer-arbitration")
 	err = row.Scan(&gotID, &gotTitle)
 	if err != nil {
-		log.Fatal(err)
+		logger.Panic(err)
 	}
 
 	logger.Infof("got: id=%s title=%s", gotID, gotTitle)
-	
+
 }
