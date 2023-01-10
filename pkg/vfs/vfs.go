@@ -169,8 +169,69 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 }
 
 func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
+	// startSector := f.sectorForPos(off)
+	// endSector := f.sectorForPos(off)
 
-	return 0, sqlite3vfs.BusyError
+	// bytesWritten = 0
+
+	// // if startSector == endSector get it and do the write to the end
+	// if startSector == endSector {
+	// 	cm, err := f.getSector(startSector)
+	// 	if err != nil {
+	// 		f.vfs.logger.Error(err)
+	// 		return bytesWritten, err
+	// 	}
+	// 	currentData =
+	// }
+
+	// else write the end sector
+
+	//between those sectors do a total fill
+
+	firstSector := f.sectorForPos(off)
+
+	if err != nil {
+		return 0, err
+	}
+
+	lastByte := off + int64(len(p)) - 1
+
+	lastSector := f.sectorForPos(lastByte)
+
+	var (
+		nW    int
+		first = true
+	)
+	sectors, err := f.getSectorRange(firstSector, lastSector)
+	if err != nil {
+		return 0, sqlite3vfs.IOErrorRead
+	}
+	for _, sect := range sectors {
+		if first {
+			startIndex := off % SectorSize
+			bytesToCopy := SectorSize - startIndex
+
+			nn := copy(sect.data[startIndex:], p[:bytesToCopy])
+			err := f.writeSector(sect)
+			if err != nil {
+				f.vfs.logger.Error(err)
+				return 0, err
+			}
+			nW += nn
+			first = false
+			continue
+		}
+
+		nn := copy(sect.data, p[n:])
+		err := f.writeSector(sect)
+		if err != nil {
+			f.vfs.logger.Error(err)
+			return n, err
+		}
+		nW += nn
+	}
+
+	return n, nil
 }
 
 // Sync noops as we're doing the writes directly
@@ -247,10 +308,13 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 func (v *vfs) Delete(name string, dirSync bool) error {
 	// in case we're racing another client
 	f := newFile(name, v)
-	for i := 0; i < 100; i++ {
+	for i := 0; i <= f.vfs.retries; i++ {
 		err := f.vfs.kc.CoreV1().Namespaces().Delete(context.TODO(), f.namespaceName(), metav1.DeleteOptions{})
-		f.vfs.logger.Error(err)
-		return sqlite3vfs.IOError
+		if err != nil {
+			return nil
+		} else {
+			f.vfs.logger.Error(err)
+		}
 	}
 	f.vfs.logger.Errorw("Failed to delete file", "filename", name, "dirSync", dirSync)
 	return sqlite3vfs.IOError
