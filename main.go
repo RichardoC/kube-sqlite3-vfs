@@ -19,7 +19,7 @@ import (
 type Options struct {
 	KubeConfig string `long:"kubeconfig" description:"(optional) absolute path to the kubeconfig file"`
 	Verbose    bool   `long:"verbosity" short:"v" description:"Uses zap Development default verbose mode rather than production"`
-	Retries    int    `long:"retries" description:"Number of retries for API calls"`
+	Retries    int    `long:"retries" description:"Number of retries for API calls" default:"1"`
 }
 
 func main() {

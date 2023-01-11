@@ -24,13 +24,13 @@ func (f *file) sectorForPos(pos int64) int64 {
 }
 
 func (f *file) deleteSector(sectorOffset int64) error {
-	n := sectorNameFromSectorOffset(sectorOffset)
+	n := f.sectorNameFromSectorOffset(sectorOffset)
 	err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Delete(context.TODO(), n, metav1.DeleteOptions{})
 	return err
 }
 
 func (f *file) writeSector(s *sector) error {
-	sectorName := sectorNameFromSectorOffset(s.offset)
+	sectorName := f.sectorNameFromSectorOffset(s.offset)
 	b64Data := make([]byte, base64.StdEncoding.EncodedLen(len(s.data)))
 	base64.StdEncoding.Encode(b64Data, s.data)
 	//map[string][]byte]{"sector": "b64Data"}
@@ -55,18 +55,23 @@ func (f *file) writeSector(s *sector) error {
 	return nil
 }
 
-func sectorNameFromSectorOffset(sectorOffset int64) string {
+func (f *file) sectorNameFromSectorOffset(sectorOffset int64) string {
+	// if sectorOffset == -1 {
+	// 	last, err := f.getLastSector()
+
+	// }
 	sectorName := fmt.Sprintf("%d", sectorOffset)
 	return sectorName
 }
 
 func (f *file) getSector(sectorOffset int64) (*sector, error) {
-	sectorName := sectorNameFromSectorOffset(sectorOffset)
+	f.vfs.logger.Debugw("getSector", "sectorOffset", sectorOffset)
+	sectorName := f.sectorNameFromSectorOffset(sectorOffset)
 	cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), sectorName, metav1.GetOptions{})
 
 	if err != nil {
 		f.vfs.logger.Error(err)
-		return nil, err
+		return nil, sqlite3vfs.CantOpenError
 	}
 
 	// Make a new function, and inverse
