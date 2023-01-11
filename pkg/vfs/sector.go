@@ -20,16 +20,23 @@ type sector struct {
 }
 
 func (f *file) sectorForPos(pos int64) int64 {
-	return pos - (pos % SectorSize)
+
+	s := pos - (pos % SectorSize)
+	f.vfs.logger.Debugw("sectorForPos", "pos", pos, "sector", s)
+
+	return s
 }
 
 func (f *file) deleteSector(sectorOffset int64) error {
 	n := f.sectorNameFromSectorOffset(sectorOffset)
 	err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Delete(context.TODO(), n, metav1.DeleteOptions{})
+	f.vfs.logger.Debugw("deleteSector", "sectorOffset", sectorOffset, "err", err)
+
 	return err
 }
 
 func (f *file) writeSector(s *sector) error {
+	f.vfs.logger.Debugw("writeSector", "sector", s)
 	sectorName := f.sectorNameFromSectorOffset(s.offset)
 	b64Data := make([]byte, base64.StdEncoding.EncodedLen(len(s.data)))
 	base64.StdEncoding.Encode(b64Data, s.data)
@@ -56,11 +63,14 @@ func (f *file) writeSector(s *sector) error {
 }
 
 func (f *file) sectorNameFromSectorOffset(sectorOffset int64) string {
+
 	// if sectorOffset == -1 {
 	// 	last, err := f.getLastSector()
 
 	// }
 	sectorName := fmt.Sprintf("%d", sectorOffset)
+	f.vfs.logger.Debugw("sectorNameFromSectorOffset", "sectorOffset", sectorOffset, "sectorName", sectorName)
+
 	return sectorName
 }
 
@@ -93,20 +103,37 @@ func (f *file) getSector(sectorOffset int64) (*sector, error) {
 }
 
 func (f *file) getLastSector() (*sector, error) {
+	f.vfs.logger.Debugw("getLastSector")
+
 	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(SectorLabel).String()})
+	f.vfs.logger.Debugw("getLastSector", "sector configmaps", cms, "err", err)
+
 
 	if err != nil {
 		f.vfs.logger.Error(err)
 		return nil, err
 	}
+
 	sectorNo := len(cms.Items) - 1
+
+	f.vfs.logger.Debugw("getLastSector", "sectorNo", sectorNo)
 
 	return f.getSector(int64(sectorNo))
 
 }
 
 func (f *file) getSectorRange(firstSector, lastSector int64) ([]*sector, error) {
+	f.vfs.logger.Debugw("getSectorRange", "firstSector", firstSector, "lastSector", lastSector)
 
+	if firstSector == lastSector {
+		sect, err := f.getSector(firstSector)
+		if err == sectorNotFoundErr {
+			return nil, nil
+		} else if err != nil {
+			return nil, err
+		}
+		return []*sector{sect}, nil
+	}
 	sectors := make([]*sector, (lastSector - firstSector))
 
 	for i := firstSector; i <= lastSector; i++ {
@@ -118,5 +145,6 @@ func (f *file) getSectorRange(firstSector, lastSector int64) ([]*sector, error) 
 		sectors[i] = thisSector
 
 	}
+
 	return sectors, nil
 }

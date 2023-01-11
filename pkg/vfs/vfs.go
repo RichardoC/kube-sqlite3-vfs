@@ -12,6 +12,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -106,12 +107,15 @@ func (f *file) Truncate(size int64) error {
 }
 
 func (f *file) FileSize() (int64, error) {
+	f.vfs.logger.Debugw("FileSize", "f", f)
 	lastcm, err := f.getLastSector()
 	if err != nil {
 		return 0, err
 	}
 	// Could have an off by one error
 	size := lastcm.offset*f.SectorSize() + int64(len(lastcm.data))
+	f.vfs.logger.Debugw("FileSize", "f", f, "size", size)
+
 	return size, nil
 
 }
@@ -138,6 +142,10 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 	fileSize, err := f.FileSize()
 	if err != nil {
 		return 0, err
+	}
+	if fileSize == 0 {
+		f.vfs.logger.Debug("ReadAt found no data to return")
+		return 0, nil
 	}
 
 	lastByte := off + int64(len(p)) - 1
@@ -166,11 +174,12 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 	if lastByte >= fileSize {
 		return n, io.EOF
 	}
-
+	f.vfs.logger.Debugw("ReadAt", "off", off, "buffer", p, "n", n)
 	return n, nil
 }
 
 func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
+	f.vfs.logger.Debugw("WriteAt", "p", p, "off", off)
 	// startSector := f.sectorForPos(off)
 	// endSector := f.sectorForPos(off)
 
@@ -238,33 +247,42 @@ func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
 
 // Sync noops as we're doing the writes directly
 func (f *file) Sync(flag sqlite3vfs.SyncType) error {
+	f.vfs.logger.Debugw("Sync", "flag", flag)
+
 	return nil
 }
 
 func (f *file) getCurrentLock() (sqlite3vfs.LockType, error) {
+	f.vfs.logger.Debugw("getCurrentLock")
+
 	cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), LockFileName, metav1.GetOptions{})
 	if err != nil {
 		f.vfs.logger.Error(err)
 		return sqlite3vfs.LockNone, err
 	}
 	currentLockString := cm.Data["lock"]
+	lockToReturn := sqlite3vfs.LockNone
 	switch currentLockString {
 	case sqlite3vfs.LockNone.String():
-		return sqlite3vfs.LockNone, nil
+		lockToReturn = sqlite3vfs.LockNone
 	case sqlite3vfs.LockShared.String():
-		return sqlite3vfs.LockShared, nil
+		lockToReturn = sqlite3vfs.LockShared
 	case sqlite3vfs.LockPending.String():
-		return sqlite3vfs.LockPending, nil
+		lockToReturn = sqlite3vfs.LockPending
 	case sqlite3vfs.LockExclusive.String():
-		return sqlite3vfs.LockExclusive, nil
+		lockToReturn = sqlite3vfs.LockExclusive
 	default:
 		errStr := fmt.Sprintf("lock type unknown: %v, %v", f, currentLockString)
 		f.vfs.logger.Error(errStr)
 		return sqlite3vfs.LockNone, errors.New(errStr)
 	}
+	f.vfs.logger.Debugw("getCurrentLock", "found current lock", lockToReturn)
+
+	return lockToReturn, nil
 }
 
 func (f *file) setLock(lock sqlite3vfs.LockType) error {
+
 	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
 	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
 	return err
@@ -351,7 +369,9 @@ func newFile(name string, v *vfs) *file {
 }
 
 func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sqlite3vfs.OpenFlag, error) {
+	v.logger.Debugw("Open", "name", name, "flags", flags)
 	// in case we're racing another client
+
 	for i := 0; i < v.retries; i++ {
 		// Check if namespace and lockfile already exist.
 		// If they don't, create them
@@ -382,7 +402,28 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 				f.vfs.logger.Error(err)
 				continue
 			}
+		} else if err != nil {
+			return f, flags, err
 		}
+
+		cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(SectorLabel).String()})
+		v.logger.Debugw("Checked for existing sectors", "sectors", cms, "err", err)
+		if err != nil {
+			v.logger.Debugw("err response for data configmaps", "error", err)
+		}
+		if len(cms.Items) == 0 {
+			// emptydata := [SectorSize]byte{}
+			// err := f.writeSector(&sector{offset: 0, data: emptydata[:]})
+			err := f.writeSector(&sector{offset: 0})
+			if err != nil {
+				v.logger.Error(err)
+				return f, flags, err
+
+			}
+
+		}
+		v.logger.Debugw("Opened file successfully", "name", name, "flags", flags)
+
 		return f, flags, nil
 
 	}
@@ -421,6 +462,7 @@ func (v *vfs) FullPathname(name string) string {
 // CheckReservedLock
 // TODO actually fulfil this
 func (f *file) CheckReservedLock() (bool, error) {
+
 	currentLock, err := f.getCurrentLock()
 	if err != nil {
 		f.vfs.logger.Error(err)
