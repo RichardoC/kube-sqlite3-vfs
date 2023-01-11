@@ -18,7 +18,7 @@ import (
 
 const (
 	LockFileName = "lockfile"
-	SectorSize   = 64 * 1024
+	SectorSize   = 64 * 1024 // Just until I work out how to make bigger slices for the data
 )
 
 // Only var because this can't be a const
@@ -90,7 +90,7 @@ func (f *file) Truncate(size int64) error {
 		return err
 	}
 
-	sect.data = sect.data[:size%SectorSize]
+	sect.Data = sect.Data[:size%SectorSize]
 
 	f.writeSector(sect)
 
@@ -113,7 +113,7 @@ func (f *file) FileSize() (int64, error) {
 		return 0, err
 	}
 	// Could have an off by one error
-	size := lastcm.offset*f.SectorSize() + int64(len(lastcm.data))
+	size := lastcm.Offset*f.SectorSize() + int64(len(lastcm.Data))
 	f.vfs.logger.Debugw("FileSize", "f", f, "size", size)
 
 	return size, nil
@@ -163,12 +163,12 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 	for _, sect := range sectors {
 		if first {
 			startIndex := off % SectorSize
-			n = copy(p, sect.data[startIndex:])
+			n = copy(p, sect.Data[startIndex:])
 			first = false
 			continue
 		}
 
-		nn := copy(p[n:], sect.data)
+		nn := copy(p[n:], sect.Data)
 		n += nn
 	}
 	if lastByte >= fileSize {
@@ -225,9 +225,17 @@ func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
 	for _, sect := range sectors {
 		if first {
 			startIndex := off % SectorSize
-			bytesToCopy := SectorSize - startIndex
+			var bytesToCopy int64
+			if len(p) < SectorSize {
+				bytesToCopy = int64(len(p))
+			} else {
+				bytesToCopy = SectorSize - startIndex // bug here, what if our sector is longer than the write?
+			}
+			sectorData := make([]byte, SectorSize)
+			_ = copy(sectorData, sect.Data) // Possible bug here, add logging
 
-			nn := copy(sect.data[startIndex:], p[:bytesToCopy])
+			nn := copy(sectorData[startIndex:], p[:bytesToCopy])
+			sect.Data = sectorData
 			err := f.writeSector(sect)
 			if err != nil {
 				f.vfs.logger.Error(err)
@@ -238,7 +246,7 @@ func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
 			continue
 		}
 
-		nn := copy(sect.data, p[n:])
+		nn := copy(sect.Data, p[n:])
 		err := f.writeSector(sect)
 		if err != nil {
 			f.vfs.logger.Error(err)
@@ -289,16 +297,15 @@ func (f *file) getCurrentLock() (sqlite3vfs.LockType, error) {
 }
 
 func (f *file) setLock(lock sqlite3vfs.LockType) error {
-	f.vfs.logger.Debugw("setLock","lock", lock)
-
+	f.vfs.logger.Debugw("setLock", "lock", lock)
 
 	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
 	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Update(context.TODO(), lf, metav1.UpdateOptions{})
-	f.vfs.logger.Debugw("setLock","lock", lock, "err", err)
+	f.vfs.logger.Debugw("setLock", "lock", lock, "err", err)
 	if kerrors.IsNotFound(err) {
 		lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
 		_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
-		f.vfs.logger.Debugw("setLock","lock", lock, "err", err)
+		f.vfs.logger.Debugw("setLock", "lock", lock, "err", err)
 		return err
 	}
 
@@ -431,7 +438,7 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		if len(cms.Items) == 0 {
 			// emptydata := [SectorSize]byte{}
 			// err := f.writeSector(&sector{offset: 0, data: emptydata[:]})
-			err := f.writeSector(&sector{offset: 0})
+			err := f.writeSector(&sector{Offset: 0})
 			if err != nil {
 				v.logger.Error(err)
 				return f, flags, err
@@ -450,11 +457,13 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 }
 
 func (v *vfs) Delete(name string, dirSync bool) error {
+	v.logger.Debugw("Delete", "name", name, "dirSync", dirSync)
 	// in case we're racing another client
 	f := newFile(name, v)
 	for i := 0; i <= f.vfs.retries; i++ {
 		err := f.vfs.kc.CoreV1().Namespaces().Delete(context.TODO(), f.namespaceName(), metav1.DeleteOptions{})
-		if err != nil {
+		v.logger.Debugw("Delete", "name", name, "dirSync", dirSync, "err", err)
+		if kerrors.IsNotFound(err) || err == nil {
 			return nil
 		} else {
 			f.vfs.logger.Error(err)

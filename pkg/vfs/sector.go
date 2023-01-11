@@ -2,12 +2,12 @@ package vfs
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 
 	"github.com/psanford/sqlite3vfs"
 	corev1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 )
@@ -15,13 +15,13 @@ import (
 var sectorNotFoundErr = errors.New("sector not found")
 
 type sector struct {
-	offset int64
-	data   []byte
+	Offset int64
+	Data   []byte
 }
 
 func (f *file) sectorForPos(pos int64) int64 {
 
-	s := pos - (pos % SectorSize)
+	s := (pos / SectorSize)
 	f.vfs.logger.Debugw("sectorForPos", "pos", pos, "sector", s)
 
 	return s
@@ -37,9 +37,9 @@ func (f *file) deleteSector(sectorOffset int64) error {
 
 func (f *file) writeSector(s *sector) error {
 	f.vfs.logger.Debugw("writeSector", "sector", s)
-	sectorName := f.sectorNameFromSectorOffset(s.offset)
-	b64Data := make([]byte, base64.StdEncoding.EncodedLen(len(s.data)))
-	base64.StdEncoding.Encode(b64Data, s.data)
+	sectorName := f.sectorNameFromSectorOffset(s.Offset)
+	// b64Data := make([]byte, SectorSize)
+	// base64.StdEncoding.Encode(b64Data, s.data)
 	//map[string][]byte]{"sector": "b64Data"}
 	// binaryDataField :=  map[string][]byte{"sector": b64Data}
 	cm := &corev1.ConfigMap{
@@ -52,9 +52,17 @@ func (f *file) writeSector(s *sector) error {
 			Namespace: f.namespaceName(),
 			Labels:    SectorLabel,
 		},
-		BinaryData: map[string][]byte{"sector": b64Data},
+		BinaryData: map[string][]byte{"sector": s.Data},
 	}
 	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), cm, metav1.CreateOptions{})
+	if kerrors.IsAlreadyExists(err) {
+		_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Update(context.TODO(), cm, metav1.UpdateOptions{})
+		if err != nil {
+			f.vfs.logger.Error(err)
+			return err
+		}
+		return nil
+	}
 	if err != nil {
 		f.vfs.logger.Error(err)
 		return err
@@ -78,6 +86,7 @@ func (f *file) getSector(sectorOffset int64) (*sector, error) {
 	f.vfs.logger.Debugw("getSector", "sectorOffset", sectorOffset)
 	sectorName := f.sectorNameFromSectorOffset(sectorOffset)
 	cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), sectorName, metav1.GetOptions{})
+	f.vfs.logger.Debugw("getSector", "sectorOffset", sectorOffset, "cm", cm)
 
 	if err != nil {
 		f.vfs.logger.Error(err)
@@ -85,8 +94,9 @@ func (f *file) getSector(sectorOffset int64) (*sector, error) {
 	}
 
 	// Make a new function, and inverse
-	sectorData := make([]byte, base64.StdEncoding.DecodedLen(len(cm.BinaryData["sector"])))
-	n, err := base64.StdEncoding.Decode(sectorData, []byte(cm.BinaryData["sector"]))
+	sectorData := make([]byte, SectorSize)
+	n := copy(sectorData, cm.BinaryData["sector"])
+	// n, err := base64.StdEncoding.Decode(sectorData, cm.BinaryData["sector"])
 	// sectorData, err := f.bytesFromB32Byte(cm.BinaryData["sector"])
 	if err != nil {
 		f.vfs.logger.Error(err)
@@ -95,8 +105,8 @@ func (f *file) getSector(sectorOffset int64) (*sector, error) {
 	sectorData = sectorData[:n]
 
 	s := sector{
-		offset: sectorOffset,
-		data:   sectorData,
+		Offset: sectorOffset,
+		Data:   sectorData,
 	}
 
 	return &s, nil
@@ -107,7 +117,6 @@ func (f *file) getLastSector() (*sector, error) {
 
 	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(SectorLabel).String()})
 	f.vfs.logger.Debugw("getLastSector", "sector configmaps", cms, "err", err)
-
 
 	if err != nil {
 		f.vfs.logger.Error(err)
