@@ -128,6 +128,7 @@ type file struct {
 }
 
 func (f *file) ReadAt(p []byte, off int64) (int, error) {
+	f.vfs.logger.Debugw("ReadAt", "off", off, "buffer", p)
 	// if f.closed {
 	// 	return 0, os.ErrClosed
 	// }
