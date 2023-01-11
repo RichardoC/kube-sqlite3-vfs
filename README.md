@@ -9,3 +9,6 @@ a configmap called "lockfile" which contains the lock information
 a series of configmaps named chunk-NUMBER which contain 64kB of data each
 
 namespaces all labelled with "kube-sqlite3-vfs": "used" to ease cleanup
+
+
+TODO: all locking/unlocking

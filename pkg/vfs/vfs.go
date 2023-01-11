@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base32"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/psanford/sqlite3vfs"
@@ -67,7 +68,7 @@ func (f *file) bytesFromB32Byte(b []byte) ([]byte, error) {
 
 func (f *file) Close() error {
 	// TODO, remove locks/etc
-	return nil
+	return f.setLock(sqlite3vfs.LockNone)
 }
 
 func (f *file) Truncate(size int64) error {
@@ -239,13 +240,96 @@ func (f *file) Sync(flag sqlite3vfs.SyncType) error {
 	return nil
 }
 
+func (f *file) getCurrentLock() (sqlite3vfs.LockType, error) {
+	cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), LockFileName, metav1.GetOptions{})
+	if err != nil {
+		f.vfs.logger.Error(err)
+		return sqlite3vfs.LockNone, err
+	}
+	currentLockString := cm.Data["lock"]
+	switch currentLockString {
+	case sqlite3vfs.LockNone.String():
+		return sqlite3vfs.LockNone, nil
+	case sqlite3vfs.LockShared.String():
+		return sqlite3vfs.LockShared, nil
+	case sqlite3vfs.LockPending.String():
+		return sqlite3vfs.LockPending, nil
+	case sqlite3vfs.LockExclusive.String():
+		return sqlite3vfs.LockExclusive, nil
+	default:
+		errStr := fmt.Sprintf("lock type unknown: %v, %v", f, currentLockString)
+		f.vfs.logger.Error(errStr)
+		return sqlite3vfs.LockNone, errors.New(errStr)
+	}
+}
+
+func (f *file) setLock(lock sqlite3vfs.LockType) error {
+	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
+	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
+	return err
+
+}
+
 // TODO actually have a lock configmap with whatever's needed
 func (f *file) Lock(elock sqlite3vfs.LockType) error {
-	return nil
+	currentLock, err := f.getCurrentLock()
+	if err != nil {
+		f.vfs.logger.Error(err)
+		return err
+	}
+
+	//    UNLOCKED -> SHARED
+	//    SHARED -> RESERVED
+	//    SHARED -> (PENDING) -> EXCLUSIVE
+	//    RESERVED -> (PENDING) -> EXCLUSIVE
+	//    PENDING -> EXCLUSIVE
+
+	if elock <= currentLock {
+		return nil
+	}
+
+	//  (1) We never move from unlocked to anything higher than shared lock.
+	if currentLock == sqlite3vfs.LockNone && elock > sqlite3vfs.LockShared {
+		return errors.New("invalid lock transition requested")
+	}
+	//  (2) SQLite never explicitly requests a pendig lock.
+	if elock == sqlite3vfs.LockPending {
+		return errors.New("invalid Lock() request for state pending")
+	}
+	//  (3) A shared lock is always held when a reserve lock is requested.
+	if elock == sqlite3vfs.LockReserved && currentLock != sqlite3vfs.LockShared {
+		return errors.New("can only transition to Reserved lock from Shared lock")
+	}
+
+	return f.setLock(elock)
+
 }
 
 func (f *file) Unlock(elock sqlite3vfs.LockType) error {
-	return nil
+
+	currentLock, err := f.getCurrentLock()
+	if err != nil {
+		f.vfs.logger.Error(err)
+		return err
+	}
+
+	if elock > sqlite3vfs.LockShared {
+		f.vfs.logger.Panicf(fmt.Sprintf("Invalid unlock request to level %s", elock))
+	}
+
+	if currentLock < elock {
+		f.vfs.logger.Panic("Cannot unlock to a level > current lock level")
+	}
+
+	if elock == currentLock {
+		return nil
+	}
+
+	if elock == sqlite3vfs.LockShared {
+		return f.setLock(sqlite3vfs.LockShared)
+	}
+
+	return f.setLock(sqlite3vfs.LockNone)
 }
 
 func (f *file) SectorSize() int64 {
@@ -290,8 +374,9 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		// Now check for lock file
 		_, err = f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), LockFileName, metav1.GetOptions{})
 		if kerrors.IsNotFound(err) {
-			lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}}
-			_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
+			err = f.setLock(sqlite3vfs.LockNone)
+			// lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}}
+			// _, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
 			if err != nil {
 				f.vfs.logger.Error(err)
 				continue
@@ -335,5 +420,14 @@ func (v *vfs) FullPathname(name string) string {
 // CheckReservedLock
 // TODO actually fulfil this
 func (f *file) CheckReservedLock() (bool, error) {
+	currentLock, err := f.getCurrentLock()
+	if err != nil {
+		f.vfs.logger.Error(err)
+		return false, err
+	}
+	if currentLock > sqlite3vfs.LockNone {
+		// we hold a lock
+		return true, nil
+	}
 	return false, nil
 }

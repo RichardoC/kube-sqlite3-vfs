@@ -76,6 +76,7 @@ func main() {
 		logger.Panic(err)
 	}
 
+
 	vfs := vfs.NewVFS(clientset, logger, opts.Retries)
 
 	// register the custom donutdb vfs with sqlite
@@ -91,7 +92,7 @@ func main() {
 	// you can have multiple db files stored in a single dynamodb table
 	// The `vfs=donutdb` instructs sqlite to use the custom vfs implementation.
 	// The name must match the name passed to `sqlite3vfs.RegisterVFS`
-	db, err := sql.Open("sqlite3", "file0.db?vfs=kube-sqlite3-vfs")
+	db, err := sql.Open("sqlite3", "file1.db?vfs=kube-sqlite3-vfs")
 	if err != nil {
 		logger.Panic(err)
 	}
