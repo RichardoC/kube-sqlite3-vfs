@@ -175,6 +175,11 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 		return n, io.EOF
 	}
 	f.vfs.logger.Debugw("ReadAt", "off", off, "buffer", p, "n", n)
+
+	if n < len(p) {
+		return n, sqlite3vfs.IOErrorShortRead
+	}
+
 	return n, nil
 }
 
@@ -271,6 +276,8 @@ func (f *file) getCurrentLock() (sqlite3vfs.LockType, error) {
 		lockToReturn = sqlite3vfs.LockPending
 	case sqlite3vfs.LockExclusive.String():
 		lockToReturn = sqlite3vfs.LockExclusive
+	case sqlite3vfs.LockReserved.String():
+		lockToReturn = sqlite3vfs.LockReserved
 	default:
 		errStr := fmt.Sprintf("lock type unknown: %v, %v", f, currentLockString)
 		f.vfs.logger.Error(errStr)
@@ -282,9 +289,13 @@ func (f *file) getCurrentLock() (sqlite3vfs.LockType, error) {
 }
 
 func (f *file) setLock(lock sqlite3vfs.LockType) error {
+	f.vfs.logger.Debugw("setLock","lock", lock)
+
 
 	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
-	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
+	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Update(context.TODO(), lf, metav1.UpdateOptions{})
+	f.vfs.logger.Debugw("setLock","lock", lock, "err", err)
+
 	return err
 
 }

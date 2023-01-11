@@ -79,32 +79,39 @@ func main() {
 
 	vfs := vfs.NewVFS(clientset, logger, opts.Retries)
 
-	// register the custom donutdb vfs with sqlite
+
+	// register the custom kube-sqlite3-vfs vfs with sqlite
 	// the name specifed here must match the `vfs` param
 	// passed to sql.Open in the dataSourceName:
-	// e.g. `...?vfs=donutdb`
+	// e.g. `...?vfs=kube-sqlite3-vfs`
 	err = sqlite3vfs.RegisterVFS("kube-sqlite3-vfs", vfs)
 	if err != nil {
 		logger.Panicw("Failed to Register VFS", "error", err)
 	}
 
-	// file0 is the name of the file stored in dynamodb
-	// you can have multiple db files stored in a single dynamodb table
-	// The `vfs=donutdb` instructs sqlite to use the custom vfs implementation.
+	// file0 is the name of the file stored in kubernetes
+	// The `vfs=kube-sqlite3-vfs` instructs sqlite to use the custom vfs implementation.
 	// The name must match the name passed to `sqlite3vfs.RegisterVFS`
-	db, err := sql.Open("sqlite3", "file1.db?vfs=kube-sqlite3-vfs")
+	db, err := sql.Open("sqlite3", "file2.db?vfs=kube-sqlite3-vfs")
 	if err != nil {
 		logger.Panic(err)
 	}
 	defer db.Close()
 
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS foo (
+	_, err = db.Exec(`CREATE TABLE boo (
 id text NOT NULL PRIMARY KEY,
 title text
 )`)
 	if err != nil {
 		logger.Panic(err)
 	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS foo (
+		id text NOT NULL PRIMARY KEY,
+		title text
+		)`)
+			if err != nil {
+				logger.Panic(err)
+			}
 
 	_, err = db.Exec(`INSERT INTO foo (id, title) values (?, ?)`, "developer-arbitration", "washroom-whitecap")
 	if err != nil {
