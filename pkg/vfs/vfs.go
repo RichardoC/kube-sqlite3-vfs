@@ -295,6 +295,12 @@ func (f *file) setLock(lock sqlite3vfs.LockType) error {
 	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
 	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Update(context.TODO(), lf, metav1.UpdateOptions{})
 	f.vfs.logger.Debugw("setLock","lock", lock, "err", err)
+	if kerrors.IsNotFound(err) {
+		lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
+		_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
+		f.vfs.logger.Debugw("setLock","lock", lock, "err", err)
+		return err
+	}
 
 	return err
 
@@ -344,7 +350,7 @@ func (f *file) Unlock(elock sqlite3vfs.LockType) error {
 	}
 
 	if elock > sqlite3vfs.LockShared {
-		f.vfs.logger.Panicf(fmt.Sprintf("Invalid unlock request to level %s", elock))
+		f.vfs.logger.Panicf("Invalid unlock request to level %s", elock)
 	}
 
 	if currentLock < elock {
