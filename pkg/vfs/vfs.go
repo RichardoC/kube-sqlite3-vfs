@@ -113,7 +113,7 @@ func (f *file) FileSize() (int64, error) {
 		return 0, err
 	}
 	// Could have an off by one error
-	size := lastcm.Offset*f.SectorSize() + int64(len(lastcm.Data))
+	size := lastcm.Index*f.SectorSize() + int64(len(lastcm.Data))
 	f.vfs.logger.Debugw("FileSize", "f", f, "size", size)
 
 	return size, nil
@@ -131,8 +131,9 @@ type file struct {
 	// lockManager lockManager
 }
 
+// this needs to return Eof if a read is attempted off the end of the file...
 func (f *file) ReadAt(p []byte, off int64) (int, error) {
-	f.vfs.logger.Debugw("ReadAt", "off", off, "buffer", p)
+	f.vfs.logger.Debugw("ReadAt", "off", off, "len(buffer)", len(p))
 	// if f.closed {
 	// 	return 0, os.ErrClosed
 	// }
@@ -174,7 +175,7 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 	if lastByte >= fileSize {
 		return n, io.EOF
 	}
-	f.vfs.logger.Debugw("ReadAt", "off", off, "buffer", p, "n", n)
+	f.vfs.logger.Debugw("ReadAt", "off", off, "len(buffer)", len(p), "n", n)
 
 	if n < len(p) {
 		return n, sqlite3vfs.IOErrorShortRead
@@ -184,7 +185,7 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 }
 
 func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
-	f.vfs.logger.Debugw("WriteAt", "p", p, "off", off)
+	f.vfs.logger.Debugw("WriteAt", "len(p)", len(p), "off", off)
 	// startSector := f.sectorForPos(off)
 	// endSector := f.sectorForPos(off)
 
@@ -396,6 +397,12 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 	v.logger.Debugw("Open", "name", name, "flags", flags)
 	// in case we're racing another client
 
+	_, err := v.kc.ServerVersion()
+	if err != nil {
+		v.logger.Error(err)
+		return nil, flags, sqlite3vfs.IOError
+	}
+
 	for i := 0; i < v.retries; i++ {
 		// Check if namespace and lockfile already exist.
 		// If they don't, create them
@@ -438,7 +445,7 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		if len(cms.Items) == 0 {
 			// emptydata := [SectorSize]byte{}
 			// err := f.writeSector(&sector{offset: 0, data: emptydata[:]})
-			err := f.writeSector(&sector{Offset: 0})
+			err := f.writeSector(&sector{Index: 0})
 			if err != nil {
 				v.logger.Error(err)
 				return f, flags, err

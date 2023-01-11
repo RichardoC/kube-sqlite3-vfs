@@ -15,8 +15,8 @@ import (
 var sectorNotFoundErr = errors.New("sector not found")
 
 type sector struct {
-	Offset int64
-	Data   []byte
+	Index int64
+	Data  []byte
 }
 
 func (f *file) sectorForPos(pos int64) int64 {
@@ -27,17 +27,17 @@ func (f *file) sectorForPos(pos int64) int64 {
 	return s
 }
 
-func (f *file) deleteSector(sectorOffset int64) error {
-	n := f.sectorNameFromSectorOffset(sectorOffset)
+func (f *file) deleteSector(sectorIndex int64) error {
+	n := f.sectorNameFromSectorIndex(sectorIndex)
 	err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Delete(context.TODO(), n, metav1.DeleteOptions{})
-	f.vfs.logger.Debugw("deleteSector", "sectorOffset", sectorOffset, "err", err)
+	f.vfs.logger.Debugw("deleteSector", "sectorIndex", sectorIndex, "err", err)
 
 	return err
 }
 
 func (f *file) writeSector(s *sector) error {
-	f.vfs.logger.Debugw("writeSector", "sector", s)
-	sectorName := f.sectorNameFromSectorOffset(s.Offset)
+	f.vfs.logger.Debugw("writeSector", "sectorIndex", s.Index)
+	sectorName := f.sectorNameFromSectorIndex(s.Index)
 	// b64Data := make([]byte, SectorSize)
 	// base64.StdEncoding.Encode(b64Data, s.data)
 	//map[string][]byte]{"sector": "b64Data"}
@@ -70,27 +70,27 @@ func (f *file) writeSector(s *sector) error {
 	return nil
 }
 
-func (f *file) sectorNameFromSectorOffset(sectorOffset int64) string {
+func (f *file) sectorNameFromSectorIndex(sectorIndex int64) string {
 
-	// if sectorOffset == -1 {
+	// if sectorIndex == -1 {
 	// 	last, err := f.getLastSector()
 
 	// }
-	sectorName := fmt.Sprintf("%d", sectorOffset)
-	f.vfs.logger.Debugw("sectorNameFromSectorOffset", "sectorOffset", sectorOffset, "sectorName", sectorName)
+	sectorName := fmt.Sprintf("%d", sectorIndex)
+	f.vfs.logger.Debugw("sectorNameFromSectorIndex", "sectorIndex", sectorIndex, "sectorName", sectorName)
 
 	return sectorName
 }
 
-func (f *file) getSector(sectorOffset int64) (*sector, error) {
-	f.vfs.logger.Debugw("getSector", "sectorOffset", sectorOffset)
-	sectorName := f.sectorNameFromSectorOffset(sectorOffset)
+func (f *file) getSector(sectorIndex int64) (*sector, error) {
+	f.vfs.logger.Debugw("getSector", "sectorIndex", sectorIndex)
+	sectorName := f.sectorNameFromSectorIndex(sectorIndex)
 	cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), sectorName, metav1.GetOptions{})
-	f.vfs.logger.Debugw("getSector", "sectorOffset", sectorOffset, "cm", cm)
+	f.vfs.logger.Debugw("getSector", "sectorIndex", sectorIndex, "err", err)
 
 	if err != nil {
 		f.vfs.logger.Error(err)
-		return nil, sqlite3vfs.CantOpenError
+		return nil, sqlite3vfs.IOErrorShortRead
 	}
 
 	// Make a new function, and inverse
@@ -105,8 +105,8 @@ func (f *file) getSector(sectorOffset int64) (*sector, error) {
 	sectorData = sectorData[:n]
 
 	s := sector{
-		Offset: sectorOffset,
-		Data:   sectorData,
+		Index: sectorIndex,
+		Data:  sectorData,
 	}
 
 	return &s, nil
@@ -116,18 +116,18 @@ func (f *file) getLastSector() (*sector, error) {
 	f.vfs.logger.Debugw("getLastSector")
 
 	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(SectorLabel).String()})
-	f.vfs.logger.Debugw("getLastSector", "sector configmaps", cms, "err", err)
+	f.vfs.logger.Debugw("getLastSector", "len(configmaps)", len(cms.Items), "err", err)
 
 	if err != nil {
 		f.vfs.logger.Error(err)
 		return nil, err
 	}
 
-	sectorNo := len(cms.Items) - 1
+	sectorIndex := len(cms.Items) - 1
 
-	f.vfs.logger.Debugw("getLastSector", "sectorNo", sectorNo)
+	f.vfs.logger.Debugw("getLastSector", "sectorIndex", sectorIndex)
 
-	return f.getSector(int64(sectorNo))
+	return f.getSector(int64(sectorIndex))
 
 }
 
