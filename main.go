@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	// "fmt"
 	"log"
 	"path/filepath"
 
@@ -76,15 +77,13 @@ func main() {
 		logger.Panic(err)
 	}
 
-
-	vfs := vfs.NewVFS(clientset, logger, opts.Retries)
-
+	vfsN := vfs.NewVFS(clientset, logger, opts.Retries)
 
 	// register the custom kube-sqlite3-vfs vfs with sqlite
 	// the name specifed here must match the `vfs` param
 	// passed to sql.Open in the dataSourceName:
 	// e.g. `...?vfs=kube-sqlite3-vfs`
-	err = sqlite3vfs.RegisterVFS("kube-sqlite3-vfs", vfs)
+	err = sqlite3vfs.RegisterVFS("kube-sqlite3-vfs", vfsN)
 	if err != nil {
 		logger.Panicw("Failed to Register VFS", "error", err)
 	}
@@ -97,6 +96,12 @@ func main() {
 		logger.Panic(err)
 	}
 	defer db.Close()
+	// PRAGMA page_size = 2048;
+	// pgma := fmt.Sprintf("PRAGMA page_size = %d", vfs.SectorSize)
+	// _, err = db.Exec(pgma)
+	// if err != nil {
+	// 	logger.Panic(err)
+	// }
 
 	_, err = db.Exec(`CREATE TABLE boo (
 id text NOT NULL PRIMARY KEY,
@@ -109,9 +114,9 @@ title text
 		id text NOT NULL PRIMARY KEY,
 		title text
 		)`)
-			if err != nil {
-				logger.Panic(err)
-			}
+	if err != nil {
+		logger.Panic(err)
+	}
 
 	_, err = db.Exec(`INSERT INTO foo (id, title) values (?, ?)`, "developer-arbitration", "washroom-whitecap")
 	if err != nil {

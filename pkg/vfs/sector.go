@@ -62,8 +62,7 @@ func (f *file) writeSector(s *sector) error {
 			return err
 		}
 		return nil
-	}
-	if err != nil {
+	} else	if err != nil {
 		f.vfs.logger.Error(err)
 		return err
 	}
@@ -88,7 +87,21 @@ func (f *file) getSector(sectorIndex int64) (*sector, error) {
 	cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), sectorName, metav1.GetOptions{})
 	f.vfs.logger.Debugw("getSector", "sectorIndex", sectorIndex, "err", err)
 
-	if err != nil {
+	// Make an empty sector if it doesn't exist
+	// Since we read then write
+	if kerrors.IsNotFound(err) {
+		err := f.writeSector(&sector{Index: sectorIndex})
+		if err != nil {
+			f.vfs.logger.Error(err)
+			return nil, err
+		}
+		cm, err = f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), sectorName, metav1.GetOptions{})
+		if err != nil {
+			f.vfs.logger.Error(err)
+			return nil, err
+		}
+
+	} else if err != nil {
 		f.vfs.logger.Error(err)
 		return nil, sqlite3vfs.IOErrorShortRead
 	}
@@ -98,10 +111,10 @@ func (f *file) getSector(sectorIndex int64) (*sector, error) {
 	n := copy(sectorData, cm.BinaryData["sector"])
 	// n, err := base64.StdEncoding.Decode(sectorData, cm.BinaryData["sector"])
 	// sectorData, err := f.bytesFromB32Byte(cm.BinaryData["sector"])
-	if err != nil {
-		f.vfs.logger.Error(err)
-		return nil, sqlite3vfs.IOErrorRead
-	}
+	// if err != nil {
+	// 	f.vfs.logger.Error(err)
+	// 	return nil, sqlite3vfs.IOErrorRead
+	// }
 	sectorData = sectorData[:n]
 
 	s := sector{

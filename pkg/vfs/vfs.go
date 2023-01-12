@@ -110,6 +110,8 @@ func (f *file) FileSize() (int64, error) {
 	f.vfs.logger.Debugw("FileSize", "f", f)
 	lastcm, err := f.getLastSector()
 	if err != nil {
+		f.vfs.logger.Error(err)
+
 		return 0, err
 	}
 	// Could have an off by one error
@@ -142,16 +144,27 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 
 	fileSize, err := f.FileSize()
 	if err != nil {
+		f.vfs.logger.Debugw("ReadAt", "off", off, "len(buffer)", len(p), "fileSize", fileSize, "err", err)
+
 		return 0, err
 	}
-	if fileSize == 0 {
-		f.vfs.logger.Debug("ReadAt found no data to return")
-		return 0, nil
-	}
+
+	// if fileSize == 0 {
+	// 	f.vfs.logger.Debug("ReadAt found no data to return")
+	// 	return 0, nil
+	// }
 
 	lastByte := off + int64(len(p)) - 1
 
 	lastSector := f.sectorForPos(lastByte)
+	if lastByte > fileSize {
+		lastSector = f.sectorForPos(fileSize)
+		lastByte = fileSize
+	}
+	if off >= fileSize {
+		f.vfs.logger.Debugw("ReadAt", "off", off, "len(buffer)", len(p), "fileSize", fileSize, "err", err)
+		return 0, io.EOF
+	}
 
 	var (
 		n     int
@@ -393,6 +406,7 @@ func newFile(name string, v *vfs) *file {
 	return &file{rawName: name, vfs: v, encoding: e}
 }
 
+// TODO, locking so other connections refused?
 func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sqlite3vfs.OpenFlag, error) {
 	v.logger.Debugw("Open", "name", name, "flags", flags)
 	// in case we're racing another client
@@ -446,6 +460,8 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 			// emptydata := [SectorSize]byte{}
 			// err := f.writeSector(&sector{offset: 0, data: emptydata[:]})
 			err := f.writeSector(&sector{Index: 0})
+			v.logger.Debugw("wrote an empty sector", "error", err)
+
 			if err != nil {
 				v.logger.Error(err)
 				return f, flags, err
@@ -458,7 +474,7 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		return f, flags, nil
 
 	}
-
+	v.logger.Debugw("Failed to open file")
 	return nil, flags, errors.New("failed to get/create file metadata too many times due to races")
 
 }
