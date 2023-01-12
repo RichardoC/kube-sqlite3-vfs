@@ -69,7 +69,11 @@ func (f *file) bytesFromB32Byte(b []byte) ([]byte, error) {
 
 func (f *file) Close() error {
 	// TODO, remove locks/etc
-	return f.setLock(sqlite3vfs.LockNone)
+	// Force lock to None
+	f.vfs.logger.Debugf("Deleting lockfile for %s", f.rawName)
+	err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Delete(context.TODO(), LockFileName, metav1.DeleteOptions{})
+
+	return err
 }
 
 func (f *file) Truncate(size int64) error {
