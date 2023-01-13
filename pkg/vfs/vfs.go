@@ -40,7 +40,7 @@ func NewVFS(kc *kubernetes.Clientset, logger *zap.SugaredLogger, retries int) *v
 }
 
 func (f *file) namespaceName() string {
-	return string(f.b32ByteFromString(f.rawName))
+	return string(f.b32ByteFromString(f.RawName))
 }
 
 func (f *file) b32ByteFromString(s string) []byte {
@@ -49,29 +49,27 @@ func (f *file) b32ByteFromString(s string) []byte {
 	f.encoding.Encode(dst, sb)
 	return dst
 }
-func (f *file) b32ByteFromBytes(s []byte) []byte {
-	dst := make([]byte, f.encoding.EncodedLen(len(s)))
-	f.encoding.Encode(dst, s)
-	return dst
-}
+// func (f *file) b32ByteFromBytes(s []byte) []byte {
+// 	dst := make([]byte, f.encoding.EncodedLen(len(s)))
+// 	f.encoding.Encode(dst, s)
+// 	return dst
+// }
 
-func (f *file) bytesFromB32Byte(b []byte) ([]byte, error) {
+// func (f *file) bytesFromB32Byte(b []byte) ([]byte, error) {
 
-	dst := make([]byte, f.encoding.DecodedLen(len(b)))
-	n, err := f.encoding.Decode(dst, b)
-	if err != nil {
-		f.vfs.logger.Errorw("decode error:", "error", err)
-		return []byte{}, err
-	}
-	dst = dst[:n]
-	return dst, err
-}
+// 	dst := make([]byte, f.encoding.DecodedLen(len(b)))
+// 	n, err := f.encoding.Decode(dst, b)
+// 	if err != nil {
+// 		f.vfs.logger.Errorw("decode error:", "error", err)
+// 		return []byte{}, err
+// 	}
+// 	dst = dst[:n]
+// 	return dst, err
+// }
 
 func (f *file) Close() error {
-	// TODO, remove locks/etc
-	// Force lock to None
-	f.vfs.logger.Debugf("Deleting lockfile for %s", f.rawName)
-	err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Delete(context.TODO(), LockFileName, metav1.DeleteOptions{})
+
+	err := f.setLock(sqlite3vfs.LockNone)
 
 	return err
 }
@@ -128,7 +126,7 @@ func (f *file) FileSize() (int64, error) {
 
 type file struct {
 	// dataRowKey string
-	rawName string
+	RawName string
 	// randID     string
 	// closed     bool
 	vfs      *vfs
@@ -166,7 +164,7 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 		lastByte = fileSize
 	}
 	if off >= fileSize {
-		f.vfs.logger.Debugw("ReadAt", "off", off, "len(buffer)", len(p), "fileSize", fileSize, "err", err)
+		f.vfs.logger.Debugw("ReadAt", "off", off, "len(buffer)", len(p), "fileSize", fileSize, "err", io.EOF)
 		return 0, io.EOF
 	}
 
@@ -314,6 +312,7 @@ func (f *file) getCurrentLock() (sqlite3vfs.LockType, error) {
 	return lockToReturn, nil
 }
 
+// possibly add the validation?
 func (f *file) setLock(lock sqlite3vfs.LockType) error {
 	f.vfs.logger.Debugw("setLock", "lock", lock)
 
@@ -407,7 +406,7 @@ func (f *file) DeviceCharacteristics() sqlite3vfs.DeviceCharacteristic {
 func newFile(name string, v *vfs) *file {
 	o := base32.NewEncoding("abcdefghijklmnopqrstuv0123456789")
 	e := o.WithPadding('x')
-	return &file{rawName: name, vfs: v, encoding: e}
+	return &file{RawName: name, vfs: v, encoding: e}
 }
 
 // TODO, locking so other connections refused?

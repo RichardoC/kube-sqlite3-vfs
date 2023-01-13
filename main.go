@@ -103,20 +103,21 @@ func main() {
 	// 	logger.Panic(err)
 	// }
 
-	_, err = db.Exec(`CREATE TABLE boo (
-id text NOT NULL PRIMARY KEY,
-title text
-)`)
+	// Seemed to work if only this?
+	_, err = db.Exec(`CREATE TABLE foo (
+	id text NOT NULL PRIMARY KEY,
+	title text
+	)`)
 	if err != nil {
 		logger.Panic(err)
 	}
-	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS foo (
-		id text NOT NULL PRIMARY KEY,
-		title text
-		)`)
-	if err != nil {
-		logger.Panic(err)
-	}
+	// _, err = db.Exec(`CREATE TABLE IF NOT EXISTS foo (
+	// 	id text NOT NULL PRIMARY KEY,
+	// 	title text
+	// 	)`)
+	// if err != nil {
+	// 	logger.Panic(err)
+	// }
 
 	_, err = db.Exec(`INSERT INTO foo (id, title) values (?, ?)`, "developer-arbitration", "washroom-whitecap")
 	if err != nil {
