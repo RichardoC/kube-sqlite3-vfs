@@ -321,7 +321,7 @@ func (f *file) LockFileName() string {
 }
 
 func (f *file) generateSectorsLabels() {
-	fileNameLabel := fmt.Sprintf("%s-%s", f.b32ByteFromString(f.RawName), LockFileNameSuffix)
+	fileNameLabel := string(f.b32ByteFromString(f.RawName))
 	f.sectorLabels = CommonSectorLabel
 	f.sectorLabels["relevant-file"] = fileNameLabel
 }
@@ -509,7 +509,7 @@ func (v *vfs) Delete(name string, dirSync bool) error {
 		v.logger.Debugw("Deleting configmaps representing this filename", "name", name)
 		cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.sectorLabels).String()})
 		if err != nil {
-			v.logger.Errorw("Delete get cms failed", "err", err)
+			v.logger.Errorw("Delete's get cms failed", "err", err)
 		}
 		v.logger.Debugw("Delete get cms", "cms", cms, "err", err)
 		aDeleteFailed := false
@@ -521,6 +521,8 @@ func (v *vfs) Delete(name string, dirSync bool) error {
 				aDeleteFailed = true
 				continue
 			}
+			v.logger.Debugw("Deleted configmap", "configmap", c)
+
 		}
 		if aDeleteFailed {
 			continue
@@ -534,7 +536,6 @@ func (v *vfs) Delete(name string, dirSync bool) error {
 			f.vfs.logger.Error(err)
 			continue
 		}
-		return nil
 
 		// // err := f.vfs.kc.CoreV1().Namespaces().Delete(context.TODO(), f.vfs.namespace, metav1.DeleteOptions{})
 		// v.logger.Debugw("Delete", "name", name, "dirSync", dirSync, "err", err)
