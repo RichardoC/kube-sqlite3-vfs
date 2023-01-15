@@ -16,3 +16,6 @@ kube-sqlite3-vfs
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+#
+# Vim temp files
+*.swp
