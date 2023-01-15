@@ -15,9 +15,9 @@ import (
 var sectorNotFoundErr = errors.New("sector not found")
 
 type sector struct {
-	Index     int64
-	Data      []byte
-	Labels    map[string]string
+	Index  int64
+	Data   []byte
+	Labels map[string]string
 	// Namespace string
 }
 
@@ -52,10 +52,10 @@ func (f *file) writeSector(s *sector) error {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      sectorName,
 			Namespace: f.vfs.namespace,
-			Labels:    f.sectorLabels,
+			Labels:    f.SectorLabels,
 		},
 		BinaryData: map[string][]byte{"sector": s.Data},
-		Data: map[string]string{"filename": f.RawName},
+		Data:       map[string]string{"filename": f.RawName},
 	}
 	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Create(context.TODO(), cm, metav1.CreateOptions{})
 	if kerrors.IsAlreadyExists(err) {
@@ -132,8 +132,8 @@ func (f *file) getSector(sectorIndex int64) (*sector, error) {
 func (f *file) getLastSector() (*sector, error) {
 	f.vfs.logger.Debugw("getLastSector")
 
-	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.sectorLabels).String()})
-	f.vfs.logger.Debugw("getLastSector","f.RawName", f.RawName, "len(configmaps)", len(cms.Items), "err", err, "f.sectorLabels", f.sectorLabels)
+	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.SectorLabels).String()})
+	f.vfs.logger.Debugw("getLastSector", "f.RawName", f.RawName, "len(configmaps)", len(cms.Items), "err", err, "f.sectorLabels", f.SectorLabels)
 
 	if err != nil {
 		f.vfs.logger.Error(err)

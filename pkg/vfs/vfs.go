@@ -133,7 +133,7 @@ type file struct {
 	// closed     bool
 	vfs          *vfs
 	encoding     *base32.Encoding
-	sectorLabels map[string]string
+	SectorLabels map[string]string
 
 	// lockManager lockManager
 }
@@ -322,8 +322,13 @@ func (f *file) LockFileName() string {
 
 func (f *file) generateSectorsLabels() {
 	fileNameLabel := string(f.b32ByteFromString(f.RawName))
-	f.sectorLabels = CommonSectorLabel
-	f.sectorLabels["relevant-file"] = fileNameLabel
+
+	f.SectorLabels = make(map[string]string)
+    for k, v := range CommonSectorLabel {
+        f.SectorLabels[k] = v
+    }
+
+	f.SectorLabels["relevant-file"] = fileNameLabel
 }
 
 // possibly add the validation?
@@ -472,7 +477,7 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 			return f, flags, err
 		}
 
-		cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.sectorLabels).String()})
+		cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.SectorLabels).String()})
 		v.logger.Debugw("Checked for existing sectors", "sectors", cms, "err", err)
 		if err != nil {
 			v.logger.Debugw("err response for data configmaps", "error", err)
@@ -507,7 +512,7 @@ func (v *vfs) Delete(name string, dirSync bool) error {
 	for i := 0; i <= f.vfs.retries; i++ {
 
 		v.logger.Debugw("Deleting configmaps representing this filename", "name", name)
-		cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.sectorLabels).String()})
+		cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.SectorLabels).String()})
 		if err != nil {
 			v.logger.Errorw("Delete's get cms failed", "err", err)
 		}
