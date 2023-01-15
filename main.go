@@ -104,11 +104,12 @@ func main() {
 	// }
 
 	// Seemed to work if only this?
-	_, err = db.Exec(`CREATE TABLE foo (
+	a, err := db.Exec(`CREATE TABLE foo (
 	id text NOT NULL PRIMARY KEY,
 	title text
 	)`)
 	if err != nil {
+		logger.Debug(a)
 		logger.Panic(err)
 	}
 	// _, err = db.Exec(`CREATE TABLE IF NOT EXISTS foo (

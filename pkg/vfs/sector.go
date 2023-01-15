@@ -78,7 +78,8 @@ func (f *file) sectorNameFromSectorIndex(sectorIndex int64) string {
 	// 	last, err := f.getLastSector()
 
 	// }
-	sectorName := fmt.Sprintf("%d", sectorIndex)
+
+	sectorName := fmt.Sprintf("%s-%d", f.b32ByteFromString(f.RawName), sectorIndex)
 	f.vfs.logger.Debugw("sectorNameFromSectorIndex", "sectorIndex", sectorIndex, "sectorName", sectorName)
 
 	return sectorName
@@ -138,6 +139,11 @@ func (f *file) getLastSector() (*sector, error) {
 	if err != nil {
 		f.vfs.logger.Error(err)
 		return nil, err
+	}
+	if len(cms.Items) == 0 {
+		f.vfs.logger.Debugw("getLastSector failed to find any sectors", "f", f, "cms", cms)
+		return nil, errors.New("failed to find any existing sectors")
+
 	}
 
 	sectorIndex := len(cms.Items) - 1

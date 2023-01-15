@@ -324,9 +324,9 @@ func (f *file) generateSectorsLabels() {
 	fileNameLabel := string(f.b32ByteFromString(f.RawName))
 
 	f.SectorLabels = make(map[string]string)
-    for k, v := range CommonSectorLabel {
-        f.SectorLabels[k] = v
-    }
+	for k, v := range CommonSectorLabel {
+		f.SectorLabels[k] = v
+	}
 
 	f.SectorLabels["relevant-file"] = fileNameLabel
 }
@@ -335,13 +335,13 @@ func (f *file) generateSectorsLabels() {
 func (f *file) setLock(lock sqlite3vfs.LockType) error {
 	f.vfs.logger.Debugw("setLock", "lock", lock)
 
-	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.LockFileName(), Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
+	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.LockFileName(), Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String(), "relevant-file": string(f.b32ByteFromString(f.RawName))}}
 	// cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Get(context.TODO(), localLockFileName, metav1.GetOptions{})
 
 	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Update(context.TODO(), lf, metav1.UpdateOptions{})
 	f.vfs.logger.Debugw("setLock", "lock", lock, "err", err)
 	if kerrors.IsNotFound(err) {
-		lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.LockFileName(), Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
+		lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.LockFileName(), Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String(), "relevant-file": string(f.b32ByteFromString(f.RawName))}}
 		_, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Create(context.TODO(), lf, metav1.CreateOptions{})
 		f.vfs.logger.Debugw("setLock has been created", "lock", lock, "err", err)
 		return err
