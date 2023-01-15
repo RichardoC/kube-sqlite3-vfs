@@ -15,8 +15,10 @@ import (
 var sectorNotFoundErr = errors.New("sector not found")
 
 type sector struct {
-	Index int64
-	Data  []byte
+	Index     int64
+	Data      []byte
+	Labels    map[string]string
+	Namespace string
 }
 
 func (f *file) sectorForPos(pos int64) int64 {
@@ -29,7 +31,7 @@ func (f *file) sectorForPos(pos int64) int64 {
 
 func (f *file) deleteSector(sectorIndex int64) error {
 	n := f.sectorNameFromSectorIndex(sectorIndex)
-	err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Delete(context.TODO(), n, metav1.DeleteOptions{})
+	err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Delete(context.TODO(), n, metav1.DeleteOptions{})
 	f.vfs.logger.Debugw("deleteSector", "sectorIndex", sectorIndex, "err", err)
 
 	return err
@@ -49,20 +51,20 @@ func (f *file) writeSector(s *sector) error {
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      sectorName,
-			Namespace: f.namespaceName(),
-			Labels:    SectorLabel,
+			Namespace: f.vfs.namespace,
+			Labels:    f.sectorLabels,
 		},
 		BinaryData: map[string][]byte{"sector": s.Data},
 	}
-	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), cm, metav1.CreateOptions{})
+	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Create(context.TODO(), cm, metav1.CreateOptions{})
 	if kerrors.IsAlreadyExists(err) {
-		_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Update(context.TODO(), cm, metav1.UpdateOptions{})
+		_, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Update(context.TODO(), cm, metav1.UpdateOptions{})
 		if err != nil {
 			f.vfs.logger.Error(err)
 			return err
 		}
 		return nil
-	} else	if err != nil {
+	} else if err != nil {
 		f.vfs.logger.Error(err)
 		return err
 	}
@@ -84,7 +86,7 @@ func (f *file) sectorNameFromSectorIndex(sectorIndex int64) string {
 func (f *file) getSector(sectorIndex int64) (*sector, error) {
 	f.vfs.logger.Debugw("getSector", "sectorIndex", sectorIndex)
 	sectorName := f.sectorNameFromSectorIndex(sectorIndex)
-	cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), sectorName, metav1.GetOptions{})
+	cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Get(context.TODO(), sectorName, metav1.GetOptions{})
 	f.vfs.logger.Debugw("getSector", "sectorIndex", sectorIndex, "err", err)
 
 	// Make an empty sector if it doesn't exist
@@ -95,11 +97,11 @@ func (f *file) getSector(sectorIndex int64) (*sector, error) {
 			f.vfs.logger.Error(err)
 			return nil, err
 		}
-		cm, err = f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), sectorName, metav1.GetOptions{})
-		if err != nil {
-			f.vfs.logger.Error(err)
-			return nil, err
-		}
+		// cm, err = f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Get(context.TODO(), sectorName, metav1.GetOptions{})
+		// if err != nil {
+		// 	f.vfs.logger.Error(err)
+		// 	return nil, err
+		// }
 
 	} else if err != nil {
 		f.vfs.logger.Error(err)
@@ -128,8 +130,8 @@ func (f *file) getSector(sectorIndex int64) (*sector, error) {
 func (f *file) getLastSector() (*sector, error) {
 	f.vfs.logger.Debugw("getLastSector")
 
-	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(SectorLabel).String()})
-	f.vfs.logger.Debugw("getLastSector", "len(configmaps)", len(cms.Items), "err", err)
+	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.sectorLabels).String()})
+	f.vfs.logger.Debugw("getLastSector", "len(configmaps)", len(cms.Items), "err", err, "f.sectorLabels", f.sectorLabels)
 
 	if err != nil {
 		f.vfs.logger.Error(err)

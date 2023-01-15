@@ -77,7 +77,7 @@ func main() {
 		logger.Panic(err)
 	}
 
-	vfsN := vfs.NewVFS(clientset, logger, opts.Retries)
+	vfsN := vfs.NewVFS(clientset, "test",  logger, opts.Retries)
 
 	// register the custom kube-sqlite3-vfs vfs with sqlite
 	// the name specifed here must match the `vfs` param

@@ -17,31 +17,32 @@ import (
 )
 
 const (
-	LockFileName = "lockfile"
-	SectorSize   = 64 * 1024 // Just until I work out how to make bigger slices for the data
+	LockFileNameSuffix = "lockfile"
+	SectorSize         = 64 * 1024 // Just until I work out how to make bigger slices for the data
 )
 
 // Only var because this can't be a const
 var (
-	SectorLabel    = map[string]string{"data": "sector"}
-	LockfileLabel  = map[string]string{"data": "lockfile"}
-	NamespaceLabel = map[string]string{"kube-sqlite3-vfs": "used"}
+	CommonSectorLabel = map[string]string{"data": "sector"}
+	LockfileLabel     = map[string]string{"data": "lockfile"}
+	// NamespaceLabel = map[string]string{"kube-sqlite3-vfs": "used"}
 )
 
 type vfs struct {
 	kc *kubernetes.Clientset
 	// file   string // actually the namespace?
-	logger  *zap.SugaredLogger
-	retries int
+	logger    *zap.SugaredLogger
+	retries   int
+	namespace string
 }
 
-func NewVFS(kc *kubernetes.Clientset, logger *zap.SugaredLogger, retries int) *vfs {
-	return &vfs{kc: kc, logger: logger, retries: retries}
+func NewVFS(kc *kubernetes.Clientset, namespace string, logger *zap.SugaredLogger, retries int) *vfs {
+	return &vfs{kc: kc, logger: logger, retries: retries, namespace: namespace}
 }
 
-func (f *file) namespaceName() string {
-	return string(f.b32ByteFromString(f.RawName))
-}
+// func (f *file) namespaceName() string {
+// 	return string(f.b32ByteFromString(f.RawName))
+// }
 
 func (f *file) b32ByteFromString(s string) []byte {
 	sb := []byte(s)
@@ -49,6 +50,7 @@ func (f *file) b32ByteFromString(s string) []byte {
 	f.encoding.Encode(dst, sb)
 	return dst
 }
+
 // func (f *file) b32ByteFromBytes(s []byte) []byte {
 // 	dst := make([]byte, f.encoding.EncodedLen(len(s)))
 // 	f.encoding.Encode(dst, s)
@@ -129,8 +131,9 @@ type file struct {
 	RawName string
 	// randID     string
 	// closed     bool
-	vfs      *vfs
-	encoding *base32.Encoding
+	vfs          *vfs
+	encoding     *base32.Encoding
+	sectorLabels map[string]string
 
 	// lockManager lockManager
 }
@@ -284,7 +287,7 @@ func (f *file) Sync(flag sqlite3vfs.SyncType) error {
 func (f *file) getCurrentLock() (sqlite3vfs.LockType, error) {
 	f.vfs.logger.Debugw("getCurrentLock")
 
-	cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), LockFileName, metav1.GetOptions{})
+	cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Get(context.TODO(), f.LockFileName(), metav1.GetOptions{})
 	if err != nil {
 		f.vfs.logger.Error(err)
 		return sqlite3vfs.LockNone, err
@@ -312,17 +315,30 @@ func (f *file) getCurrentLock() (sqlite3vfs.LockType, error) {
 	return lockToReturn, nil
 }
 
+func (f *file) LockFileName() string {
+	localLockFileName := fmt.Sprintf("%s-%s", f.b32ByteFromString(f.RawName), LockFileNameSuffix)
+	return localLockFileName
+}
+
+func (f *file) generateSectorsLabels() {
+	fileNameLabel := fmt.Sprintf("%s-%s", f.b32ByteFromString(f.RawName), LockFileNameSuffix)
+	f.sectorLabels = CommonSectorLabel
+	f.sectorLabels["relevant-file"] = fileNameLabel
+}
+
 // possibly add the validation?
 func (f *file) setLock(lock sqlite3vfs.LockType) error {
 	f.vfs.logger.Debugw("setLock", "lock", lock)
 
-	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
-	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Update(context.TODO(), lf, metav1.UpdateOptions{})
+	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.LockFileName(), Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
+	// cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Get(context.TODO(), localLockFileName, metav1.GetOptions{})
+
+	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Update(context.TODO(), lf, metav1.UpdateOptions{})
 	f.vfs.logger.Debugw("setLock", "lock", lock, "err", err)
 	if kerrors.IsNotFound(err) {
-		lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
-		_, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
-		f.vfs.logger.Debugw("setLock", "lock", lock, "err", err)
+		lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.LockFileName(), Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String()}}
+		_, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Create(context.TODO(), lf, metav1.CreateOptions{})
+		f.vfs.logger.Debugw("setLock has been created", "lock", lock, "err", err)
 		return err
 	}
 
@@ -406,7 +422,9 @@ func (f *file) DeviceCharacteristics() sqlite3vfs.DeviceCharacteristic {
 func newFile(name string, v *vfs) *file {
 	o := base32.NewEncoding("abcdefghijklmnopqrstuv0123456789")
 	e := o.WithPadding('x')
-	return &file{RawName: name, vfs: v, encoding: e}
+	f := &file{RawName: name, vfs: v, encoding: e}
+	f.generateSectorsLabels()
+	return f
 }
 
 // TODO, locking so other connections refused?
@@ -426,26 +444,26 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		// if this fails, return readonlyfs
 
 		f := newFile(name, v)
-		_, err := v.kc.CoreV1().Namespaces().Get(context.TODO(), f.namespaceName(), metav1.GetOptions{})
-		if kerrors.IsNotFound(err) {
-			// Create namespace
-			ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.namespaceName(), Labels: NamespaceLabel}}
-			_, err := v.kc.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{})
-			if err != nil {
-				v.logger.Error(err)
-				continue
-			}
-		} else if err != nil {
-			f.vfs.logger.Error(err)
-			continue
-		}
+		// _, err := v.kc.CoreV1().Namespaces().Get(context.TODO(), f.vfs.namespace, metav1.GetOptions{})
+		// if kerrors.IsNotFound(err) {
+		// 	// Create namespace
+		// 	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.vfs.namespace, Labels: NamespaceLabel}}
+		// 	_, err := v.kc.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{})
+		// 	if err != nil {
+		// 		v.logger.Error(err)
+		// 		continue
+		// 	}
+		// } else if err != nil {
+		// 	f.vfs.logger.Error(err)
+		// 	continue
+		// }
 
 		// Now check for lock file
-		_, err = f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Get(context.TODO(), LockFileName, metav1.GetOptions{})
+		_, err = f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Get(context.TODO(), f.LockFileName(), metav1.GetOptions{})
 		if kerrors.IsNotFound(err) {
 			err = f.setLock(sqlite3vfs.LockNone)
 			// lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}}
-			// _, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).Create(context.TODO(), lf, metav1.CreateOptions{})
+			// _, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Create(context.TODO(), lf, metav1.CreateOptions{})
 			if err != nil {
 				f.vfs.logger.Error(err)
 				continue
@@ -454,7 +472,7 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 			return f, flags, err
 		}
 
-		cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.namespaceName()).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(SectorLabel).String()})
+		cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.sectorLabels).String()})
 		v.logger.Debugw("Checked for existing sectors", "sectors", cms, "err", err)
 		if err != nil {
 			v.logger.Debugw("err response for data configmaps", "error", err)
@@ -487,13 +505,44 @@ func (v *vfs) Delete(name string, dirSync bool) error {
 	// in case we're racing another client
 	f := newFile(name, v)
 	for i := 0; i <= f.vfs.retries; i++ {
-		err := f.vfs.kc.CoreV1().Namespaces().Delete(context.TODO(), f.namespaceName(), metav1.DeleteOptions{})
-		v.logger.Debugw("Delete", "name", name, "dirSync", dirSync, "err", err)
+
+		v.logger.Debugw("Deleting configmaps representing this filename", "name", name)
+		cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.sectorLabels).String()})
+		if err != nil {
+			v.logger.Errorw("Delete get cms failed", "err", err)
+		}
+		v.logger.Debugw("Delete get cms", "cms", cms, "err", err)
+		aDeleteFailed := false
+
+		for _, c := range cms.Items {
+			err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Delete(context.TODO(), c.Name, metav1.DeleteOptions{})
+			if err != nil {
+				v.logger.Errorw("Delete failed to delete cm", "cm", c, "err", err)
+				aDeleteFailed = true
+				continue
+			}
+		}
+		if aDeleteFailed {
+			continue
+		}
+
+		v.logger.Debugw("Deleting lockfile for this filename", "name", name)
+		err = f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Delete(context.TODO(), f.LockFileName(), metav1.DeleteOptions{})
 		if kerrors.IsNotFound(err) || err == nil {
 			return nil
 		} else {
 			f.vfs.logger.Error(err)
+			continue
 		}
+		return nil
+
+		// // err := f.vfs.kc.CoreV1().Namespaces().Delete(context.TODO(), f.vfs.namespace, metav1.DeleteOptions{})
+		// v.logger.Debugw("Delete", "name", name, "dirSync", dirSync, "err", err)
+		// if kerrors.IsNotFound(err) || err == nil {
+		// 	return nil
+		// } else {
+		// 	f.vfs.logger.Error(err)
+		// }
 	}
 	f.vfs.logger.Errorw("Failed to delete file", "filename", name, "dirSync", dirSync)
 	return sqlite3vfs.IOError
