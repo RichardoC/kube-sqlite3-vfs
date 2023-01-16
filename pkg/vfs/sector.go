@@ -14,7 +14,7 @@ import (
 
 var sectorNotFoundErr = errors.New("sector not found")
 
-type sector struct {
+type Sector struct {
 	Index  int64
 	Data   []byte
 	Labels map[string]string
@@ -37,7 +37,7 @@ func (f *file) deleteSector(sectorIndex int64) error {
 	return err
 }
 
-func (f *file) writeSector(s *sector) error {
+func (f *file) WriteSector(s *Sector) error {
 	f.vfs.logger.Debugw("writeSector", "sectorIndex", s.Index)
 	sectorName := f.sectorNameFromSectorIndex(s.Index)
 	// b64Data := make([]byte, SectorSize)
@@ -85,7 +85,7 @@ func (f *file) sectorNameFromSectorIndex(sectorIndex int64) string {
 	return sectorName
 }
 
-func (f *file) getSector(sectorIndex int64) (*sector, error) {
+func (f *file) getSector(sectorIndex int64) (*Sector, error) {
 	f.vfs.logger.Debugw("getSector", "sectorIndex", sectorIndex)
 	sectorName := f.sectorNameFromSectorIndex(sectorIndex)
 	cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Get(context.TODO(), sectorName, metav1.GetOptions{})
@@ -95,7 +95,7 @@ func (f *file) getSector(sectorIndex int64) (*sector, error) {
 	// Since we read then write
 	if kerrors.IsNotFound(err) {
 
-		err := f.writeSector(&sector{Index: sectorIndex})
+		err := f.WriteSector(&Sector{Index: sectorIndex})
 		if err != nil {
 			f.vfs.logger.Error(err)
 			return nil, err
@@ -122,7 +122,7 @@ func (f *file) getSector(sectorIndex int64) (*sector, error) {
 	// }
 	sectorData = sectorData[:n]
 
-	s := sector{
+	s := Sector{
 		Index: sectorIndex,
 		Data:  sectorData,
 	}
@@ -130,7 +130,7 @@ func (f *file) getSector(sectorIndex int64) (*sector, error) {
 	return &s, nil
 }
 
-func (f *file) getLastSector() (*sector, error) {
+func (f *file) getLastSector() (*Sector, error) {
 	f.vfs.logger.Debugw("getLastSector")
 
 	cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.SectorLabels).String()})
@@ -154,7 +154,7 @@ func (f *file) getLastSector() (*sector, error) {
 
 }
 
-func (f *file) getSectorRange(firstSector, lastSector int64) ([]*sector, error) {
+func (f *file) getSectorRange(firstSector, lastSector int64) ([]*Sector, error) {
 	f.vfs.logger.Debugw("getSectorRange", "firstSector", firstSector, "lastSector", lastSector)
 
 	if firstSector == lastSector {
@@ -164,9 +164,9 @@ func (f *file) getSectorRange(firstSector, lastSector int64) ([]*sector, error) 
 		} else if err != nil {
 			return nil, err
 		}
-		return []*sector{sect}, nil
+		return []*Sector{sect}, nil
 	}
-	sectors := make([]*sector, (lastSector - firstSector))
+	sectors := make([]*Sector, (lastSector - firstSector))
 
 	for i := firstSector; i <= lastSector; i++ {
 		thisSector, err := f.getSector(i)

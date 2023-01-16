@@ -96,7 +96,7 @@ func (f *file) Truncate(size int64) error {
 
 	sect.Data = sect.Data[:size%SectorSize]
 
-	f.writeSector(sect)
+	f.WriteSector(sect)
 
 	lastSector := f.sectorForPos(fileSize)
 
@@ -196,8 +196,11 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 	f.vfs.logger.Debugw("ReadAt", "off", off, "len(buffer)", len(p), "n", n)
 
 	if n < len(p) {
+		f.vfs.logger.Error("Read too little")
 		return n, sqlite3vfs.IOErrorShortRead
 	}
+
+	f.vfs.logger.Debugw("ReadAt read all expected bytes")
 
 	return n, nil
 }
@@ -255,7 +258,7 @@ func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
 
 			nn := copy(sectorData[startIndex:], p[:bytesToCopy])
 			sect.Data = sectorData
-			err := f.writeSector(sect)
+			err := f.WriteSector(sect)
 			if err != nil {
 				f.vfs.logger.Error(err)
 				return 0, err
@@ -266,7 +269,7 @@ func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
 		}
 
 		nn := copy(sect.Data, p[n:])
-		err := f.writeSector(sect)
+		err := f.WriteSector(sect)
 		if err != nil {
 			f.vfs.logger.Error(err)
 			return n, err
@@ -351,8 +354,8 @@ func (f *file) setLock(lock sqlite3vfs.LockType) error {
 
 }
 
-// TODO actually have a lock configmap with whatever's needed
 func (f *file) Lock(elock sqlite3vfs.LockType) error {
+	f.vfs.logger.Debugw("Lock", "elock", elock)
 	currentLock, err := f.getCurrentLock()
 	if err != nil {
 		f.vfs.logger.Error(err)
@@ -387,6 +390,7 @@ func (f *file) Lock(elock sqlite3vfs.LockType) error {
 }
 
 func (f *file) Unlock(elock sqlite3vfs.LockType) error {
+	f.vfs.logger.Debugw("Unlock", "elock", elock)
 
 	currentLock, err := f.getCurrentLock()
 	if err != nil {
@@ -424,7 +428,7 @@ func (f *file) DeviceCharacteristics() sqlite3vfs.DeviceCharacteristic {
 	return sqlite3vfs.IocapAtomic64K
 }
 
-func newFile(name string, v *vfs) *file {
+func NewFile(name string, v *vfs) *file {
 	o := base32.NewEncoding("abcdefghijklmnopqrstuv0123456789")
 	e := o.WithPadding('x')
 	f := &file{RawName: name, vfs: v, encoding: e}
@@ -448,7 +452,7 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		// If they don't, create them
 		// if this fails, return readonlyfs
 
-		f := newFile(name, v)
+		f := NewFile(name, v)
 		// _, err := v.kc.CoreV1().Namespaces().Get(context.TODO(), f.vfs.namespace, metav1.GetOptions{})
 		// if kerrors.IsNotFound(err) {
 		// 	// Create namespace
@@ -478,14 +482,19 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		}
 
 		cms, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: labels.SelectorFromSet(f.SectorLabels).String()})
-		v.logger.Debugw("Checked for existing sectors", "sectors", cms, "err", err)
+		names := []string{}
+		for _, n := range cms.Items {
+			names = append(names, n.Name)
+		}
+
+		v.logger.Debugw("Checked for existing sectors", "sectors", names, "len(cms.Items)", len(cms.Items), "err", err)
 		if err != nil {
 			v.logger.Debugw("err response for data configmaps", "error", err)
 		}
 		if len(cms.Items) == 0 {
 			// emptydata := [SectorSize]byte{}
 			// err := f.writeSector(&sector{offset: 0, data: emptydata[:]})
-			err := f.writeSector(&sector{Index: 0})
+			err := f.WriteSector(&Sector{Index: 0, Labels: f.SectorLabels})
 			v.logger.Debugw("wrote an empty sector", "error", err)
 
 			if err != nil {
@@ -508,7 +517,7 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 func (v *vfs) Delete(name string, dirSync bool) error {
 	v.logger.Debugw("Delete", "name", name, "dirSync", dirSync)
 	// in case we're racing another client
-	f := newFile(name, v)
+	f := NewFile(name, v)
 	for i := 0; i <= f.vfs.retries; i++ {
 
 		v.logger.Debugw("Deleting configmaps representing this filename", "name", name)

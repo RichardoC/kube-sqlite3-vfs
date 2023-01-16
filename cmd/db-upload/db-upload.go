@@ -3,16 +3,18 @@ package main
 import (
 
 	// "fmt"
-	"database/sql"
+	"io"
 	"log"
+	"os"
 	"path/filepath"
 
 	// "path/filepath"
 
 	// "github.com/google/uuid"
 	"github.com/RichardoC/kube-sqlite3-vfs/pkg/vfs"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/psanford/sqlite3vfs"
+
+	// _ "github.com/mattn/go-sqlite3"
 	"github.com/thought-machine/go-flags"
 	"go.uber.org/zap"
 	"k8s.io/client-go/kubernetes"
@@ -85,37 +87,61 @@ func main() {
 
 	vfsN := vfs.NewVFS(clientset, "test", logger, opts.Retries)
 
+	fn := "file2.db"
+
+	vfsN.Open(fn, sqlite3vfs.OpenFlag(0))
+
+	f, err := os.Open(fn)
+	if err != nil {
+		logger.Panic(err)
+	}
+	defer f.Close()
+
+	b1 := make([]byte, vfs.SectorSize)
+
+	fileA := vfs.NewFile(fn, vfsN)
+
+	err = nil
+
+	index := int64(0)
+
+	for err != io.EOF {
+		var n1 int
+		n1, err = f.Read(b1)
+		if err == io.EOF && n1 == 0 {
+			break
+		}
+		logger.Infof("Writing sector %d", index)
+		if err != nil && err != io.EOF {
+			logger.Panic(err)
+		}
+		sect := &vfs.Sector{Index: index, Data: b1[:n1], Labels: fileA.SectorLabels}
+
+		err = fileA.WriteSector(sect)
+		if err != nil {
+			logger.Panic(err)
+		}
+		index += 1
+
+	}
+
 	// // register the custom kube-sqlite3-vfs vfs with sqlite
 	// // the name specifed here must match the `vfs` param
 	// // passed to sql.Open in the dataSourceName:
 	// // e.g. `...?vfs=kube-sqlite3-vfs`
-	err = sqlite3vfs.RegisterVFS("kube-sqlite3-vfs", vfsN)
-	if err != nil {
-		logger.Panicw("Failed to Register VFS", "error", err)
-	}
+	// err = sqlite3vfs.RegisterVFS("kube-sqlite3-vfs", vfsN)
+	// if err != nil {
+	// 	logger.Panicw("Failed to Register VFS", "error", err)
+	// }
 
 	// // file0 is the name of the file stored in kubernetes
 	// // The `vfs=kube-sqlite3-vfs` instructs sqlite to use the custom vfs implementation.
 	// // The name must match the name passed to `sqlite3vfs.RegisterVFS`
-	db, err := sql.Open("sqlite3", "file2.db?vfs=kube-sqlite3-vfs")
-	if err != nil {
-		logger.Panic(err)
-	}
-	defer db.Close()
-	// _, err = db.Exec("PRAGMA journal_mode = DELETE; PRAGMA temp_store=MEMORY;PRAGMA journal_mode = OFF;") // So we can ignore file creation for now
+	// db, err := sql.Open("sqlite3", "file2.db?vfs=kube-sqlite3-vfs")
 	// if err != nil {
 	// 	logger.Panic(err)
 	// }
-	rows, err := db.Query("SELECT COUNT(*) FROM books")
-	if err != nil {
-		logger.Panic(err)
-	}
-	logger.Infof("%+v", rows)
-	var count int
-	rows.Next()
-	err = rows.Scan(&count)
-	logger.Infof("Got %d rows of books with err %s", count, err)
-
+	// defer db.Close()
 	// // PRAGMA page_size = 2048;
 	// // pgma := fmt.Sprintf("PRAGMA page_size = %d", vfs.SectorSize)
 	// // _, err = db.Exec(pgma)
