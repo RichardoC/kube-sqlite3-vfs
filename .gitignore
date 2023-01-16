@@ -19,3 +19,6 @@ kube-sqlite3-vfs
 #
 # Vim temp files
 *.swp
+
+# temp db files
+file2*
