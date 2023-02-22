@@ -97,15 +97,27 @@ func main() {
 	// // file0 is the name of the file stored in kubernetes
 	// // The `vfs=kube-sqlite3-vfs` instructs sqlite to use the custom vfs implementation.
 	// // The name must match the name passed to `sqlite3vfs.RegisterVFS`
-	db, err := sql.Open("sqlite3", "file2.db?vfs=kube-sqlite3-vfs")
+	db, err := sql.Open("sqlite3", "file2.db?mode=ro&vfs=kube-sqlite3-vfs")
 	if err != nil {
 		logger.Panic(err)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
+
 	// _, err = db.Exec("PRAGMA journal_mode = DELETE; PRAGMA temp_store=MEMORY;PRAGMA journal_mode = OFF;") // So we can ignore file creation for now
 	// if err != nil {
 	// 	logger.Panic(err)
 	// }
+
+	a, err := db.Exec(`CREATE TABLE IF NOT EXISTS books (
+	id text NOT NULL PRIMARY KEY,
+	title text
+	)`)
+	if err != nil {
+		logger.Debug(a)
+		logger.Panic(err)
+	}
+
 	rows, err := db.Query("SELECT COUNT(*) FROM books")
 	if err != nil {
 		logger.Panic(err)

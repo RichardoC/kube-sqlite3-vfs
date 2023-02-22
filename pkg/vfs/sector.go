@@ -166,7 +166,7 @@ func (f *file) getSectorRange(firstSector, lastSector int64) ([]*Sector, error) 
 		}
 		return []*Sector{sect}, nil
 	}
-	sectors := make([]*Sector, (lastSector - firstSector))
+	sectors := make([]*Sector, ((lastSector - firstSector + 1))) // +1 because 0 indexes
 
 	for i := firstSector; i <= lastSector; i++ {
 		thisSector, err := f.getSector(i)

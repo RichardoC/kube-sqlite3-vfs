@@ -140,7 +140,7 @@ type file struct {
 
 // this needs to return Eof if a read is attempted off the end of the file...
 func (f *file) ReadAt(p []byte, off int64) (int, error) {
-	f.vfs.logger.Debugw("ReadAt", "off", off, "len(buffer)", len(p))
+	f.vfs.logger.Debugw("ReadAt", "f", f, "off", off, "len(buffer)", len(p))
 	// if f.closed {
 	// 	return 0, os.ErrClosed
 	// }
@@ -167,8 +167,10 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 		lastByte = fileSize
 	}
 	if off >= fileSize {
-		f.vfs.logger.Debugw("ReadAt", "off", off, "len(buffer)", len(p), "fileSize", fileSize, "err", io.EOF)
-		return 0, io.EOF
+		// Maybe this will stop it being unhappy about the journal file not existing?
+		err = sqlite3vfs.IOErrorShortRead
+		f.vfs.logger.Debugw("ReadAt", "off", off, "len(buffer)", len(p), "fileSize", fileSize, "err", err)
+		return 0, err
 	}
 
 	var (
@@ -338,13 +340,21 @@ func (f *file) generateSectorsLabels() {
 func (f *file) setLock(lock sqlite3vfs.LockType) error {
 	f.vfs.logger.Debugw("setLock", "lock", lock)
 
-	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.LockFileName(), Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String(), "relevant-file": string(f.b32ByteFromString(f.RawName))}}
+	LockfileLabels := make(map[string]string)
+	for k, v := range LockfileLabel {
+		LockfileLabels[k] = v
+	}
+	fileNameLabel := string(f.b32ByteFromString(f.RawName))
+
+	LockfileLabels["relevant-file"] = fileNameLabel
+
+	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.LockFileName(), Labels: LockfileLabels}, Data: map[string]string{"lock": lock.String(), "relevant-file": string(f.b32ByteFromString(f.RawName))}}
 	// cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Get(context.TODO(), localLockFileName, metav1.GetOptions{})
 
 	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Update(context.TODO(), lf, metav1.UpdateOptions{})
 	f.vfs.logger.Debugw("setLock", "lock", lock, "err", err)
 	if kerrors.IsNotFound(err) {
-		lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.LockFileName(), Labels: LockfileLabel}, Data: map[string]string{"lock": lock.String(), "relevant-file": string(f.b32ByteFromString(f.RawName))}}
+		lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.LockFileName(), Labels: LockfileLabels}, Data: map[string]string{"lock": lock.String(), "relevant-file": string(f.b32ByteFromString(f.RawName))}}
 		_, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Create(context.TODO(), lf, metav1.CreateOptions{})
 		f.vfs.logger.Debugw("setLock has been created", "lock", lock, "err", err)
 		return err
@@ -439,6 +449,7 @@ func NewFile(name string, v *vfs) *file {
 // TODO, locking so other connections refused?
 func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sqlite3vfs.OpenFlag, error) {
 	v.logger.Debugw("Open", "name", name, "flags", flags)
+
 	// in case we're racing another client
 
 	_, err := v.kc.ServerVersion()

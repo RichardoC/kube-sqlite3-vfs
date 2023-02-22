@@ -16,3 +16,8 @@ TODO: all locking/unlocking
 Must use only one ns as k3s gets unhappy with namespaces being created/deleted so often.
 Configmap names can be 253 characters long
 Not convinced writing is working correctly
+
+TODO add relevant-file label to lockfile too
+
+
+CURRENT ISSUE - something about opening the journal file, despite it being turned off
