@@ -27,7 +27,7 @@ import (
 
 type Options struct {
 	KubeConfig string `long:"kubeconfig" description:"(optional) absolute path to the kubeconfig file"`
-	FileName   string `long:"filename" description:"name of the sqlite3 database file to test with" default:"file2.db"`
+	FileName   string `long:"filename" description:"name of the sqlite3 database file to test with" default:"/home/richardf/gitclones/kube-sqlite3-vfs/file2.db"`
 	Verbose    bool   `long:"verbosity" short:"v" description:"Uses zap Development default verbose mode rather than production"`
 	Retries    int    `long:"retries" description:"Number of retries for API calls" default:"1"`
 }

@@ -234,7 +234,7 @@ func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
 		return 0, err
 	}
 
-	lastByte := off + int64(len(p)) - 1
+	lastByte := off + int64(len(p))  - 1
 
 	lastSector := f.sectorForPos(lastByte)
 
@@ -242,7 +242,7 @@ func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
 		nW    int
 		first = true
 	)
-	sectors, err := f.getSectorRange(firstSector, lastSector)
+	sectors, err := f.getSectorRange(firstSector, lastSector) // do we care if we're writing over the top?
 	if err != nil {
 		return 0, sqlite3vfs.IOErrorRead
 	}
@@ -270,7 +270,7 @@ func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
 			continue
 		}
 
-		nn := copy(sect.Data, p[n:])
+		nn := copy(sect.Data, p[nW:])
 		err := f.WriteSector(sect)
 		if err != nil {
 			f.vfs.logger.Error(err)
