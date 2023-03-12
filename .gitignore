@@ -22,3 +22,6 @@ kube-sqlite3-vfs
 
 # temp db files
 file2*
+
+# Debug files
+__debug_bin
