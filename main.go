@@ -97,7 +97,7 @@ func main() {
 	// // file0 is the name of the file stored in kubernetes
 	// // The `vfs=kube-sqlite3-vfs` instructs sqlite to use the custom vfs implementation.
 	// // The name must match the name passed to `sqlite3vfs.RegisterVFS`
-	db, err := sql.Open("sqlite3", "file2.db?mode=ro&vfs=kube-sqlite3-vfs")
+	db, err := sql.Open("sqlite3", "file2.db?vfs=kube-sqlite3-vfs")
 	if err != nil {
 		logger.Panic(err)
 	}
@@ -122,6 +122,7 @@ func main() {
 	if err != nil {
 		logger.Panic(err)
 	}
+	defer rows.Close()
 	logger.Infof("%+v", rows)
 	var count int
 	rows.Next()

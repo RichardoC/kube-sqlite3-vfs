@@ -257,7 +257,7 @@ func (f *file) WriteAt(p []byte, off int64) (int, error) {
 			sectorData = make([]byte, SectorSize )
 		} else {
 			// If there's existing data, ensure the buffer is large enough to hold it
-			newlyRequiredSize := (1 + lastByte) - currentOffset
+			newlyRequiredSize := (1 + lastByte) - startByteForThisSector
 			if l := int64(len(sect.Data)); l > newlyRequiredSize {
 				newlyRequiredSize = l
 			}
@@ -267,9 +267,13 @@ func (f *file) WriteAt(p []byte, off int64) (int, error) {
 		// copy in existing data
 		_ = copy(sectorData, sect.Data)
 		// copy new data
-		nn := copy(sectorData[startOffset:], p[currentOffset:])
+		nn := copy(sectorData[startOffset:], p[nW:])
 		sect.Data = sectorData
-		f.WriteSector(sect)
+		err := f.WriteSector(sect)
+		if err != nil {
+			f.vfs.logger.Error(err)
+			return nW, err
+		}
 		nW += nn
 	}
 
