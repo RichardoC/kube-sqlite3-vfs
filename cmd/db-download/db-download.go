@@ -124,7 +124,7 @@ func main() {
 	n, err = fileA.WriteAt(allBytesReal, 0)
 
 	if err != nil || n != int(fSize) {
-		logger.Errorw("Failed to write all source file", "err", err, "bytesRead", n)
+		logger.Errorw("Failed to write all source file", "err", err, "bytesWritten", n, "trueLength", fSize)
 	}
 
 	// for err != io.EOF {

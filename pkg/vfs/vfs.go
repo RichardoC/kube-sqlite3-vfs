@@ -119,7 +119,7 @@ func (f *file) FileSize() (int64, error) {
 		return 0, err
 	}
 	// Could have an off by one error
-	size := lastcm.Index*f.SectorSize() + int64(len(lastcm.Data))
+	size := lastcm.Index*f.SectorSize() + int64(len(lastcm.Data)) 
 	f.vfs.logger.Debugw("FileSize", "f", f, "size", size)
 
 	return size, nil
@@ -207,7 +207,7 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 	return n, nil
 }
 
-func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
+func (f *file) WriteAt(p []byte, off int64) (int, error) {
 	f.vfs.logger.Debugw("WriteAt", "len(p)", len(p), "off", off)
 	// startSector := f.sectorForPos(off)
 	// endSector := f.sectorForPos(off)
@@ -230,9 +230,6 @@ func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
 
 	firstSector := f.sectorForPos(off)
 
-	if err != nil {
-		return 0, err
-	}
 
 	lastByte := off + int64(len(p))  - 1
 
@@ -240,46 +237,82 @@ func (f *file) WriteAt(p []byte, off int64) (n int, err error) {
 
 	var (
 		nW    int
-		first = true
+		// first = true
 	)
 	sectors, err := f.getSectorRange(firstSector, lastSector) // do we care if we're writing over the top?
 	if err != nil {
 		return 0, sqlite3vfs.IOErrorRead
 	}
+	// replace all this logic with calculating how many bytes should be in this sector
+	// then if the sector size is smaller than than
+	// allocate a new one, copy of the old data
+	// then overwrite with the new data?
 	for _, sect := range sectors {
-		if first {
-			startIndex := off % SectorSize
-			var bytesToCopy int64
-			if len(p) < SectorSize {
-				bytesToCopy = int64(len(p))
-			} else {
-				bytesToCopy = SectorSize - startIndex // bug here, what if our sector is longer than the write?
-			}
-			sectorData := make([]byte, SectorSize)
-			_ = copy(sectorData, sect.Data) // Possible bug here, add logging
+		lastPossibleByteForThisSector :=  ((sect.Index + 1) * SectorSize) - 1
+		startByteForThisSector := ((sect.Index ) * SectorSize) 
 
-			nn := copy(sectorData[startIndex:], p[:bytesToCopy])
-			sect.Data = sectorData
-			err := f.WriteSector(sect)
-			if err != nil {
-				f.vfs.logger.Error(err)
-				return 0, err
+		currentOffset := off + int64(nW)
+		var sectorData  []byte
+		if lastByte > lastPossibleByteForThisSector {
+			sectorData = make([]byte, SectorSize )
+		} else {
+			// If there's existing data, ensure the buffer is large enough to hold it
+			newlyRequiredSize := (1 + lastByte) - currentOffset
+			if l := int64(len(sect.Data)); l > newlyRequiredSize {
+				newlyRequiredSize = l
 			}
-			nW += nn
-			first = false
-			continue
+			sectorData = make([]byte,  newlyRequiredSize)
 		}
-
-		nn := copy(sect.Data, p[nW:])
-		err := f.WriteSector(sect)
-		if err != nil {
-			f.vfs.logger.Error(err)
-			return n, err
-		}
+		startOffset := currentOffset - startByteForThisSector
+		// copy in existing data
+		_ = copy(sectorData, sect.Data)
+		// copy new data
+		nn := copy(sectorData[startOffset:], p[currentOffset:])
+		sect.Data = sectorData
+		f.WriteSector(sect)
 		nW += nn
 	}
 
-	return n, nil
+
+	// 	if first {
+	// 		startIndex := off % SectorSize
+	// 		var bytesToCopy int64
+	// 		if len(p) < SectorSize {
+	// 			bytesToCopy = int64(len(p))
+	// 		} else {
+	// 			bytesToCopy = SectorSize - startIndex // bug here, what if our sector is longer than the write?
+	// 		}
+	// 		sectorData := make([]byte, bytesToCopy + off)
+	// 		_ = copy(sectorData, sect.Data) // Possible bug here, add logging
+
+	// 		nn := copy(sectorData[startIndex:], p[:bytesToCopy])
+	// 		sect.Data = sectorData
+	// 		err := f.WriteSector(sect)
+	// 		if err != nil {
+	// 			f.vfs.logger.Error(err)
+	// 			return 0, err
+	// 		}
+	// 		nW += nn
+	// 		first = false
+	// 		continue
+	// 	} else if sect.Index ==  lastSector {
+	// 		// Make a shorter data
+	// 		bytesToCopy := int64(len(p)) + off - SectorSize * (sect.Index - 1)
+	// 		sectorData := make([]byte, bytesToCopy)
+	// 		sect.Data = sectorData
+
+	// 	}
+
+	// 	nn := copy(sect.Data, p[nW:])
+	// 	err := f.WriteSector(sect)
+	// 	if err != nil {
+	// 		f.vfs.logger.Error(err)
+	// 		return n, err
+	// 	}
+	// 	nW += nn
+	// }
+
+	return nW, nil
 }
 
 // Sync noops as we're doing the writes directly
