@@ -4,6 +4,7 @@ import (
 
 	// "fmt"
 	"bytes"
+	"database/sql"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 	"github.com/RichardoC/kube-sqlite3-vfs/pkg/vfs"
 	"github.com/psanford/sqlite3vfs"
 
-	// _ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/thought-machine/go-flags"
 	"go.uber.org/zap"
 	"k8s.io/client-go/kubernetes"
@@ -187,5 +188,42 @@ func main() {
 	} else {
 		logger.Error("Failed to read the same bytes we wrote")
 	}
+
+	// register the custom kube-sqlite3-vfs vfs with sqlite
+	// the name specifed here must match the `vfs` param
+	// passed to sql.Open in the dataSourceName:
+	// e.g. `...?vfs=kube-sqlite3-vfs`
+	err = sqlite3vfs.RegisterVFS("kube-sqlite3-vfs", vfsN)
+	if err != nil {
+		logger.Panicw("Failed to Register VFS", "error", err)
+	}
+
+	db, err := sql.Open("sqlite3", "file2.db?_query_only=true&_journal=OFF&mode=ro&sqlite_os_trace=&vfs=kube-sqlite3-vfs")
+	// db, err := sql.Open("sqlite3", "file2.db?_query_only=true&_journal=OFF&mode=ro&vfs=kube-sqlite3-vfs")
+	if err != nil {
+		logger.Panic(err)
+	}
+	defer db.Close()
+
+	db.SetMaxOpenConns(1)
+
+	// _, err = db.Exec("PRAGMA journal_mode = MEMORY;") // So we can ignore file creation for now
+	// if err != nil {
+	// 	logger.Panic(err)
+	// }	
+	// _, err = db.Exec("PRAGMA temp_store=MEMORY;") // So we can ignore file creation for now
+	// if err != nil {
+	// 	logger.Panic(err)
+	// }
+
+	rows, err := db.Query("SELECT COUNT(*) FROM books")
+	if err != nil {
+		logger.Panic(err)
+	}
+	logger.Infof("%+v", rows)
+	var count int
+	rows.Next()
+	err = rows.Scan(&count)
+	logger.Infof("Got %d rows of books with err %s", count, err)
 
 }

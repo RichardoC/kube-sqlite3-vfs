@@ -4,6 +4,7 @@ import (
 
 	// "fmt"
 	"database/sql"
+	"fmt"
 	"log"
 	"path/filepath"
 
@@ -11,6 +12,7 @@ import (
 
 	// "github.com/google/uuid"
 	"github.com/RichardoC/kube-sqlite3-vfs/pkg/vfs"
+	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/psanford/sqlite3vfs"
 	"github.com/thought-machine/go-flags"
@@ -115,19 +117,21 @@ func main() {
 	)`)
 	if err != nil {
 		logger.Debug(a)
+		logger.Debug(a.LastInsertId())
+		logger.Debug(a.RowsAffected())
 		logger.Panic(err)
 	}
 
-	rows, err := db.Query("SELECT COUNT(*) FROM books")
-	if err != nil {
-		logger.Panic(err)
-	}
-	defer rows.Close()
-	logger.Infof("%+v", rows)
-	var count int
-	rows.Next()
-	err = rows.Scan(&count)
-	logger.Infof("Got %d rows of books with err %s", count, err)
+	// rows, err := db.Query("SELECT COUNT(*) FROM books")
+	// if err != nil {
+	// 	logger.Panic(err)
+	// }
+	// defer rows.Close()
+	// logger.Infof("%+v", rows)
+	// var count int
+	// rows.Next()
+	// err = rows.Scan(&count)
+	// logger.Infof("Got %d rows of books with err %s", count, err)
 
 	// // PRAGMA page_size = 2048;
 	// // pgma := fmt.Sprintf("PRAGMA page_size = %d", vfs.SectorSize)
@@ -182,23 +186,23 @@ func main() {
 	// 	logger.Panic(err)
 	// }
 
-	// for i := 0; i < 10000; i++ {
-	// 	if i%1000 == 0 {
-	// 		logger.Infof("Got to inserting %d", i)
-	// 	}
-	// 	_, err = db.Exec(`INSERT INTO books (id, title) values (?, ?)`, uuid.NewString(), fmt.Sprintf("%d", i))
-	// 	if err != nil {
-	// 		logger.Panic(err)
-	// 	}
-	// }
+	for i := 0; i < 10000; i++ {
+		if i%1000 == 0 {
+			logger.Infof("Got to inserting %d", i)
+		}
+		_, err = db.Exec(`INSERT INTO books (id, title) values (?, ?)`, uuid.NewString(), fmt.Sprintf("%d", i))
+		if err != nil {
+			logger.Panic(err)
+		}
+	}
 
-	// rows, err := db.Query("SELECT COUNT(*) FROM books")
-	// if err != nil {
-	// 	logger.Panic(err)
-	// }
-	// logger.Infof("%+v", rows)
-	// var count int
-	// rows.Next()
-	// err = rows.Scan(&count)
-	// logger.Infof("Got %d rows of books with err %s", count, err)
+	rows, err := db.Query("SELECT COUNT(*) FROM books")
+	if err != nil {
+		logger.Panic(err)
+	}
+	logger.Infof("%+v", rows)
+	var count int
+	rows.Next()
+	err = rows.Scan(&count)
+	logger.Infof("Got %d rows of books with err %s", count, err)
 }
