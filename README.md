@@ -15,3 +15,7 @@ Configmap names can be 253 characters long
 ## WARNINGS
 
 Currently corrupts files with misaligned writes. Do not use this yet!
+
+## TODO
+
+* have filesystem be O(1) rather than O(n)

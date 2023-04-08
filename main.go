@@ -106,10 +106,12 @@ func main() {
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 
+	_, err = db.Exec("PRAGMA page_size=65536")
+
 	// _, err = db.Exec("PRAGMA journal_mode = DELETE; PRAGMA temp_store=MEMORY;PRAGMA journal_mode = OFF;") // So we can ignore file creation for now
-	// if err != nil {
-	// 	logger.Panic(err)
-	// }
+	if err != nil {
+		logger.Panic(err)
+	}
 
 	a, err := db.Exec(`CREATE TABLE IF NOT EXISTS books (
 	id text NOT NULL PRIMARY KEY,
@@ -120,6 +122,29 @@ func main() {
 		logger.Debug(a.LastInsertId())
 		logger.Debug(a.RowsAffected())
 		logger.Panic(err)
+	}
+	rows, err := db.Query(`SELECT      name FROM      sqlite_schema WHERE      type ='table' ;`)
+
+	// TODO, write some wrapper so I can write to a file, and kubernetes and highlight any differences
+
+	// _, err = db.Exec("PRAGMA journal_mode = DELETE; PRAGMA temp_store=MEMORY;PRAGMA journal_mode = OFF;") // So we can ignore file creation for now
+	if err != nil {
+		logger.Panic(err)
+	}
+	for i := 0; i != 10; {
+		// TODO remove this nonsense
+		t := rows.Next()
+		if err != nil || !t {
+			logger.Infoln("%+v", rows)
+			log.Fatal(err)
+		}
+
+		var name *string
+		err := rows.Scan(&name)
+		if err != nil {
+			log.Fatal(err)
+		}
+		logger.Infoln("%s", name)
 	}
 
 	// rows, err := db.Query("SELECT COUNT(*) FROM books")
@@ -196,7 +221,7 @@ func main() {
 		}
 	}
 
-	rows, err := db.Query("SELECT COUNT(*) FROM books")
+	rows, err = db.Query("SELECT COUNT(*) FROM books")
 	if err != nil {
 		logger.Panic(err)
 	}

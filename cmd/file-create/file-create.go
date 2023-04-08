@@ -209,7 +209,7 @@ func main() {
 	if bytes.Equal(p1, p2) {
 		logger.Info("Read the same bytes we wrote")
 	} else {
-		logger.Error("Failed to read the same bytes we wrote")
+		logger.Error("Failed to./cmd/file-create/fn read the same bytes we wrote")
 	}
 
 	randomToWrite := make([]byte, vfs.SectorSize+2)
@@ -258,11 +258,12 @@ func main() {
 	testWriting(randomToWrite, 0)
 	randomToWrite = make([]byte, vfs.SectorSize+2)
 	rand.Read(randomToWrite)
-	testWriting(randomToWrite, 1e5)
+	fSize = fi.Size()
+	testWriting(randomToWrite, fSize - 46)
 	randomToWrite = make([]byte, vfs.SectorSize+2)
-	testWriting(randomToWrite, 2e5)
+	testWriting(randomToWrite, fSize - 46)
 	randomToWrite = make([]byte, 2*vfs.SectorSize-1)
-	testWriting(randomToWrite, vfs.SectorSize-3)
+	testWriting(randomToWrite, fSize - 46 - vfs.SectorSize)
 
 	p1 = make([]byte, fSize)
 	p2 = make([]byte, fSize)
