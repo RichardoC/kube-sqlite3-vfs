@@ -99,7 +99,7 @@ func main() {
 	// // file0 is the name of the file stored in kubernetes
 	// // The `vfs=kube-sqlite3-vfs` instructs sqlite to use the custom vfs implementation.
 	// // The name must match the name passed to `sqlite3vfs.RegisterVFS`
-	db, err := sql.Open("sqlite3", "file2.db?vfs=kube-sqlite3-vfs")
+	db, err := sql.Open("sqlite3", "file2.db?_journal=MEMORY&_cache_size=-128&vfs=kube-sqlite3-vfs")
 	if err != nil {
 		logger.Panic(err)
 	}
@@ -123,29 +123,29 @@ func main() {
 		logger.Debug(a.RowsAffected())
 		logger.Panic(err)
 	}
-	rows, err := db.Query(`SELECT      name FROM      sqlite_schema WHERE      type ='table' ;`)
+	// rows, err := db.Query(`SELECT      name FROM      sqlite_schema WHERE      type ='table' ;`)
 
-	// TODO, write some wrapper so I can write to a file, and kubernetes and highlight any differences
+	// // TODO, write some wrapper so I can write to a file, and kubernetes and highlight any differences
 
-	// _, err = db.Exec("PRAGMA journal_mode = DELETE; PRAGMA temp_store=MEMORY;PRAGMA journal_mode = OFF;") // So we can ignore file creation for now
-	if err != nil {
-		logger.Panic(err)
-	}
-	for i := 0; i != 10; {
-		// TODO remove this nonsense
-		t := rows.Next()
-		if err != nil || !t {
-			logger.Infoln("%+v", rows)
-			log.Fatal(err)
-		}
+	// // _, err = db.Exec("PRAGMA journal_mode = DELETE; PRAGMA temp_store=MEMORY;PRAGMA journal_mode = OFF;") // So we can ignore file creation for now
+	// if err != nil {
+	// 	logger.Panic(err)
+	// }
+	// for i := 0; i != 10; {
+	// 	// TODO remove this nonsense
+	// 	t := rows.Next()
+	// 	if err != nil || !t {
+	// 		logger.Infoln("%+v", rows)
+	// 		log.Fatal(err)
+	// 	}
 
-		var name *string
-		err := rows.Scan(&name)
-		if err != nil {
-			log.Fatal(err)
-		}
-		logger.Infoln("%s", name)
-	}
+	// 	var name *string
+	// 	err := rows.Scan(&name)
+	// 	if err != nil {
+	// 		log.Fatal(err)
+	// 	}
+	// 	logger.Infoln("%s", name)
+	// }
 
 	// rows, err := db.Query("SELECT COUNT(*) FROM books")
 	// if err != nil {
@@ -211,8 +211,8 @@ func main() {
 	// 	logger.Panic(err)
 	// }
 
-	for i := 0; i < 10000; i++ {
-		if i%1000 == 0 {
+	for i := 0; i < 20; i++ {
+		if i%10 == 0 {
 			logger.Infof("Got to inserting %d", i)
 		}
 		_, err = db.Exec(`INSERT INTO books (id, title) values (?, ?)`, uuid.NewString(), fmt.Sprintf("%d", i))
@@ -221,7 +221,7 @@ func main() {
 		}
 	}
 
-	rows, err = db.Query("SELECT COUNT(*) FROM books")
+	rows, err := db.Query("SELECT COUNT(*) FROM books")
 	if err != nil {
 		logger.Panic(err)
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/psanford/sqlite3vfs"
 	"go.uber.org/zap"
@@ -119,7 +120,7 @@ func (f *file) FileSize() (int64, error) {
 		return 0, err
 	}
 	// Could have an off by one error
-	size := lastcm.Index*f.SectorSize() + int64(len(lastcm.Data)) 
+	size := lastcm.Index*f.SectorSize() + int64(len(lastcm.Data))
 	f.vfs.logger.Debugw("FileSize", "f", f, "size", size)
 
 	return size, nil
@@ -230,13 +231,12 @@ func (f *file) WriteAt(p []byte, off int64) (int, error) {
 
 	firstSector := f.sectorForPos(off)
 
-
-	lastByte := off + int64(len(p))  - 1
+	lastByte := off + int64(len(p)) - 1
 
 	lastSector := f.sectorForPos(lastByte)
 
 	var (
-		nW    int
+		nW int
 		// first = true
 	)
 	sectors, err := f.getSectorRange(firstSector, lastSector) // do we care if we're writing over the top?
@@ -248,20 +248,20 @@ func (f *file) WriteAt(p []byte, off int64) (int, error) {
 	// allocate a new one, copy of the old data
 	// then overwrite with the new data?
 	for _, sect := range sectors {
-		lastPossibleByteForThisSector :=  ((sect.Index + 1) * SectorSize) - 1
-		startByteForThisSector := ((sect.Index ) * SectorSize) 
+		lastPossibleByteForThisSector := ((sect.Index + 1) * SectorSize) - 1
+		startByteForThisSector := ((sect.Index) * SectorSize)
 
 		currentOffset := off + int64(nW)
-		var sectorData  []byte
+		var sectorData []byte
 		if lastByte > lastPossibleByteForThisSector {
-			sectorData = make([]byte, SectorSize )
+			sectorData = make([]byte, SectorSize)
 		} else {
 			// If there's existing data, ensure the buffer is large enough to hold it
 			newlyRequiredSize := (1 + lastByte) - startByteForThisSector
 			if l := int64(len(sect.Data)); l > newlyRequiredSize {
 				newlyRequiredSize = l
 			}
-			sectorData = make([]byte,  newlyRequiredSize)
+			sectorData = make([]byte, newlyRequiredSize)
 		}
 		startOffset := currentOffset - startByteForThisSector
 		// copy in existing data
@@ -276,7 +276,6 @@ func (f *file) WriteAt(p []byte, off int64) (int, error) {
 		}
 		nW += nn
 	}
-
 
 	// 	if first {
 	// 		startIndex := off % SectorSize
@@ -486,6 +485,11 @@ func NewFile(name string, v *vfs) *file {
 // TODO, locking so other connections refused?
 func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sqlite3vfs.OpenFlag, error) {
 	v.logger.Debugw("Open", "name", name, "flags", flags)
+	// flags = sqlite3vfs.OpenFlag(sqlite3vfs.OpenReadOnly)
+
+	// if strings.Contains(name, "journal"){
+	// 	return sqlite3vfs.
+	// }
 
 	// in case we're racing another client
 
@@ -614,6 +618,10 @@ func (v *vfs) Delete(name string, dirSync bool) error {
 // Access tests for access permission. Returns true if the requested permission is available.
 // TODO, actually fulfil this. Probably check if we can get configmaps in the namespace?
 func (v *vfs) Access(name string, flags sqlite3vfs.AccessFlag) (bool, error) {
+	v.logger.Debugw("Access", "name", name, "flags", flags)
+	if strings.HasSuffix(name, "-wal") || strings.HasSuffix(name, "-journal") {
+		return false, nil
+	}
 	return true, nil
 }
 

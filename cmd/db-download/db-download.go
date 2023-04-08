@@ -198,7 +198,7 @@ func main() {
 		logger.Panicw("Failed to Register VFS", "error", err)
 	}
 
-	db, err := sql.Open("sqlite3", "file2.db?_query_only=true&_journal=OFF&mode=ro&sqlite_os_trace=&vfs=kube-sqlite3-vfs")
+	db, err := sql.Open("sqlite3", "file2.db?_query_only=true&_journal=MEMORY&mode=ro&sqlite_os_trace=&vfs=kube-sqlite3-vfs")
 	// db, err := sql.Open("sqlite3", "file2.db?_query_only=true&_journal=OFF&mode=ro&vfs=kube-sqlite3-vfs")
 	if err != nil {
 		logger.Panic(err)
