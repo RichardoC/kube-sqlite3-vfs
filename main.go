@@ -107,8 +107,6 @@ func main() {
 	db.SetMaxOpenConns(1)
 
 	_, err = db.Exec("PRAGMA page_size=65536")
-
-	// _, err = db.Exec("PRAGMA journal_mode = DELETE; PRAGMA temp_store=MEMORY;PRAGMA journal_mode = OFF;") // So we can ignore file creation for now
 	if err != nil {
 		logger.Panic(err)
 	}
@@ -123,111 +121,53 @@ func main() {
 		logger.Debug(a.RowsAffected())
 		logger.Panic(err)
 	}
-	// rows, err := db.Query(`SELECT      name FROM      sqlite_schema WHERE      type ='table' ;`)
-
-	// // TODO, write some wrapper so I can write to a file, and kubernetes and highlight any differences
-
-	// // _, err = db.Exec("PRAGMA journal_mode = DELETE; PRAGMA temp_store=MEMORY;PRAGMA journal_mode = OFF;") // So we can ignore file creation for now
-	// if err != nil {
-	// 	logger.Panic(err)
-	// }
-	// for i := 0; i != 10; {
-	// 	// TODO remove this nonsense
-	// 	t := rows.Next()
-	// 	if err != nil || !t {
-	// 		logger.Infoln("%+v", rows)
-	// 		log.Fatal(err)
-	// 	}
-
-	// 	var name *string
-	// 	err := rows.Scan(&name)
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
-	// 	logger.Infoln("%s", name)
-	// }
-
-	// rows, err := db.Query("SELECT COUNT(*) FROM books")
-	// if err != nil {
-	// 	logger.Panic(err)
-	// }
-	// defer rows.Close()
-	// logger.Infof("%+v", rows)
-	// var count int
-	// rows.Next()
-	// err = rows.Scan(&count)
-	// logger.Infof("Got %d rows of books with err %s", count, err)
-
-	// // PRAGMA page_size = 2048;
-	// // pgma := fmt.Sprintf("PRAGMA page_size = %d", vfs.SectorSize)
-	// // _, err = db.Exec(pgma)
-	// // if err != nil {
-	// // 	logger.Panic(err)
-	// // }
-
-	// // Seemed to work if only this?
-	// a, err := db.Exec(`CREATE TABLE foo (
-	// id text NOT NULL PRIMARY KEY,
-	// title text
-	// )`)
-	// if err != nil {
-	// 	logger.Debug(a)
-	// 	logger.Panic(err)
-	// }
-	// // _, err = db.Exec(`CREATE TABLE IF NOT EXISTS foo (
-	// // 	id text NOT NULL PRIMARY KEY,
-	// // 	title text
-	// // 	)`)
-	// // if err != nil {
-	// // 	logger.Panic(err)
-	// // }
-
-	// _, err = db.Exec(`INSERT INTO foo (id, title) values (?, ?)`, "developer-arbitration", "washroom-whitecap")
-	// if err != nil {
-	// 	logger.Panic(err)
-	// }
-
-	// var gotID, gotTitle string
-	// row := db.QueryRow("SELECT id, title FROM foo where id = ?", "developer-arbitration")
-	// err = row.Scan(&gotID, &gotTitle)
-	// if err != nil {
-	// 	logger.Panic(err)
-	// }
-
-	// logger.Infof("got: id=%s title=%s", gotID, gotTitle)
-
-	// db, err := sql.Open("sqlite3", "file2.db")
-	// if err != nil {
-	// 	logger.Panic(err)
-	// }
-	// defer db.Close()
-
-	// a, err := db.Exec(`CREATE TABLE IF NOT EXISTS books (
-	// id text NOT NULL PRIMARY KEY,
-	// title text
-	// )`)
-	// if err != nil {
-	// 	logger.Debug(a)
-	// 	logger.Panic(err)
-	// }
-
-	for i := 0; i < 20; i++ {
-		if i%10 == 0 {
-			logger.Infof("Got to inserting %d", i)
-		}
-		_, err = db.Exec(`INSERT INTO books (id, title) values (?, ?)`, uuid.NewString(), fmt.Sprintf("%d", i))
+	tx, err := db.Begin()
+	if err != nil {
+		logger.Fatal(err)
+	}
+	stmt, err := tx.Prepare("INSERT INTO books (id, title) VALUES (?, ?)")
+	if err != nil {
+		logger.Error(err)
+	}
+	defer stmt.Close()
+	totalToInsert := 1000
+	for i := 0; i < totalToInsert; i++ {
+		_, err = stmt.Exec(uuid.NewString(), fmt.Sprintf("%d", i))
 		if err != nil {
-			logger.Panic(err)
+			logger.Error(err)
 		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		logger.Fatal(err)
 	}
 
 	rows, err := db.Query("SELECT COUNT(*) FROM books")
 	if err != nil {
 		logger.Panic(err)
 	}
-	logger.Infof("%+v", rows)
+
 	var count int
 	rows.Next()
 	err = rows.Scan(&count)
 	logger.Infof("Got %d rows of books with err %s", count, err)
+
+	rows, err = db.Query("SELECT * FROM books LIMIT 10")
+	if err != nil {
+		logger.Panic(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id   string
+			name string
+		)
+		if err := rows.Scan(&id, &name); err != nil {
+			logger.Error(err)
+			continue
+		}
+		logger.Infof("ID: %d, Name: %s\n", id, name)
+
+	}
 }

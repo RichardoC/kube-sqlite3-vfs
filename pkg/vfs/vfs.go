@@ -19,19 +19,17 @@ import (
 
 const (
 	LockFileNameSuffix = "lockfile"
-	SectorSize         = 64 * 1024 // Just until I work out how to make bigger slices for the data
+	SectorSize         = 64 * 1024 // Max pagesize supported by SQLITE3
 )
 
 // Only var because this can't be a const
 var (
 	CommonSectorLabel = map[string]string{"data": "sector"}
 	LockfileLabel     = map[string]string{"data": "lockfile"}
-	// NamespaceLabel = map[string]string{"kube-sqlite3-vfs": "used"}
 )
 
 type vfs struct {
-	kc *kubernetes.Clientset
-	// file   string // actually the namespace?
+	kc        *kubernetes.Clientset
 	logger    *zap.SugaredLogger
 	retries   int
 	namespace string
@@ -41,34 +39,12 @@ func NewVFS(kc *kubernetes.Clientset, namespace string, logger *zap.SugaredLogge
 	return &vfs{kc: kc, logger: logger, retries: retries, namespace: namespace}
 }
 
-// func (f *file) namespaceName() string {
-// 	return string(f.b32ByteFromString(f.RawName))
-// }
-
 func (f *file) b32ByteFromString(s string) []byte {
 	sb := []byte(s)
 	dst := make([]byte, f.encoding.EncodedLen(len(sb)))
 	f.encoding.Encode(dst, sb)
 	return dst
 }
-
-// func (f *file) b32ByteFromBytes(s []byte) []byte {
-// 	dst := make([]byte, f.encoding.EncodedLen(len(s)))
-// 	f.encoding.Encode(dst, s)
-// 	return dst
-// }
-
-// func (f *file) bytesFromB32Byte(b []byte) ([]byte, error) {
-
-// 	dst := make([]byte, f.encoding.DecodedLen(len(b)))
-// 	n, err := f.encoding.Decode(dst, b)
-// 	if err != nil {
-// 		f.vfs.logger.Errorw("decode error:", "error", err)
-// 		return []byte{}, err
-// 	}
-// 	dst = dst[:n]
-// 	return dst, err
-// }
 
 func (f *file) Close() error {
 
@@ -128,23 +104,15 @@ func (f *file) FileSize() (int64, error) {
 }
 
 type file struct {
-	// dataRowKey string
-	RawName string
-	// randID     string
-	// closed     bool
+	RawName      string
 	vfs          *vfs
 	encoding     *base32.Encoding
 	SectorLabels map[string]string
-
-	// lockManager lockManager
 }
 
 // this needs to return Eof if a read is attempted off the end of the file...
 func (f *file) ReadAt(p []byte, off int64) (int, error) {
 	f.vfs.logger.Debugw("ReadAt", "f", f, "off", off, "len(buffer)", len(p))
-	// if f.closed {
-	// 	return 0, os.ErrClosed
-	// }
 
 	firstSector := f.sectorForPos(off)
 
@@ -154,11 +122,6 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 
 		return 0, err
 	}
-
-	// if fileSize == 0 {
-	// 	f.vfs.logger.Debug("ReadAt found no data to return")
-	// 	return 0, nil
-	// }
 
 	lastByte := off + int64(len(p)) - 1
 
@@ -210,24 +173,6 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 
 func (f *file) WriteAt(p []byte, off int64) (int, error) {
 	f.vfs.logger.Debugw("WriteAt", "len(p)", len(p), "off", off)
-	// startSector := f.sectorForPos(off)
-	// endSector := f.sectorForPos(off)
-
-	// bytesWritten = 0
-
-	// // if startSector == endSector get it and do the write to the end
-	// if startSector == endSector {
-	// 	cm, err := f.getSector(startSector)
-	// 	if err != nil {
-	// 		f.vfs.logger.Error(err)
-	// 		return bytesWritten, err
-	// 	}
-	// 	currentData =
-	// }
-
-	// else write the end sector
-
-	//between those sectors do a total fill
 
 	firstSector := f.sectorForPos(off)
 
@@ -237,7 +182,6 @@ func (f *file) WriteAt(p []byte, off int64) (int, error) {
 
 	var (
 		nW int
-		// first = true
 	)
 	sectors, err := f.getSectorRange(firstSector, lastSector) // do we care if we're writing over the top?
 	if err != nil {
@@ -276,44 +220,6 @@ func (f *file) WriteAt(p []byte, off int64) (int, error) {
 		}
 		nW += nn
 	}
-
-	// 	if first {
-	// 		startIndex := off % SectorSize
-	// 		var bytesToCopy int64
-	// 		if len(p) < SectorSize {
-	// 			bytesToCopy = int64(len(p))
-	// 		} else {
-	// 			bytesToCopy = SectorSize - startIndex // bug here, what if our sector is longer than the write?
-	// 		}
-	// 		sectorData := make([]byte, bytesToCopy + off)
-	// 		_ = copy(sectorData, sect.Data) // Possible bug here, add logging
-
-	// 		nn := copy(sectorData[startIndex:], p[:bytesToCopy])
-	// 		sect.Data = sectorData
-	// 		err := f.WriteSector(sect)
-	// 		if err != nil {
-	// 			f.vfs.logger.Error(err)
-	// 			return 0, err
-	// 		}
-	// 		nW += nn
-	// 		first = false
-	// 		continue
-	// 	} else if sect.Index ==  lastSector {
-	// 		// Make a shorter data
-	// 		bytesToCopy := int64(len(p)) + off - SectorSize * (sect.Index - 1)
-	// 		sectorData := make([]byte, bytesToCopy)
-	// 		sect.Data = sectorData
-
-	// 	}
-
-	// 	nn := copy(sect.Data, p[nW:])
-	// 	err := f.WriteSector(sect)
-	// 	if err != nil {
-	// 		f.vfs.logger.Error(err)
-	// 		return n, err
-	// 	}
-	// 	nW += nn
-	// }
 
 	return nW, nil
 }
@@ -385,7 +291,6 @@ func (f *file) setLock(lock sqlite3vfs.LockType) error {
 	LockfileLabels["relevant-file"] = fileNameLabel
 
 	lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: f.LockFileName(), Labels: LockfileLabels}, Data: map[string]string{"lock": lock.String(), "relevant-file": string(f.b32ByteFromString(f.RawName))}}
-	// cm, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Get(context.TODO(), localLockFileName, metav1.GetOptions{})
 
 	_, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Update(context.TODO(), lf, metav1.UpdateOptions{})
 	f.vfs.logger.Debugw("setLock", "lock", lock, "err", err)
@@ -485,13 +390,6 @@ func NewFile(name string, v *vfs) *file {
 // TODO, locking so other connections refused?
 func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sqlite3vfs.OpenFlag, error) {
 	v.logger.Debugw("Open", "name", name, "flags", flags)
-	// flags = sqlite3vfs.OpenFlag(sqlite3vfs.OpenReadOnly)
-
-	// if strings.Contains(name, "journal"){
-	// 	return sqlite3vfs.
-	// }
-
-	// in case we're racing another client
 
 	_, err := v.kc.ServerVersion()
 	if err != nil {
@@ -505,26 +403,11 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 		// if this fails, return readonlyfs
 
 		f := NewFile(name, v)
-		// _, err := v.kc.CoreV1().Namespaces().Get(context.TODO(), f.vfs.namespace, metav1.GetOptions{})
-		// if kerrors.IsNotFound(err) {
-		// 	// Create namespace
-		// 	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: f.vfs.namespace, Labels: NamespaceLabel}}
-		// 	_, err := v.kc.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{})
-		// 	if err != nil {
-		// 		v.logger.Error(err)
-		// 		continue
-		// 	}
-		// } else if err != nil {
-		// 	f.vfs.logger.Error(err)
-		// 	continue
-		// }
 
 		// Now check for lock file
 		_, err = f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Get(context.TODO(), f.LockFileName(), metav1.GetOptions{})
 		if kerrors.IsNotFound(err) {
 			err = f.setLock(sqlite3vfs.LockNone)
-			// lf := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: LockFileName, Labels: LockfileLabel}}
-			// _, err := f.vfs.kc.CoreV1().ConfigMaps(f.vfs.namespace).Create(context.TODO(), lf, metav1.CreateOptions{})
 			if err != nil {
 				f.vfs.logger.Error(err)
 				continue
@@ -544,8 +427,6 @@ func (v *vfs) Open(name string, flags sqlite3vfs.OpenFlag) (sqlite3vfs.File, sql
 			v.logger.Debugw("err response for data configmaps", "error", err)
 		}
 		if len(cms.Items) == 0 {
-			// emptydata := [SectorSize]byte{}
-			// err := f.writeSector(&sector{offset: 0, data: emptydata[:]})
 			err := f.WriteSector(&Sector{Index: 0, Labels: f.SectorLabels})
 			v.logger.Debugw("wrote an empty sector", "error", err)
 
@@ -602,23 +483,15 @@ func (v *vfs) Delete(name string, dirSync bool) error {
 			f.vfs.logger.Error(err)
 			continue
 		}
-
-		// // err := f.vfs.kc.CoreV1().Namespaces().Delete(context.TODO(), f.vfs.namespace, metav1.DeleteOptions{})
-		// v.logger.Debugw("Delete", "name", name, "dirSync", dirSync, "err", err)
-		// if kerrors.IsNotFound(err) || err == nil {
-		// 	return nil
-		// } else {
-		// 	f.vfs.logger.Error(err)
-		// }
 	}
 	f.vfs.logger.Errorw("Failed to delete file", "filename", name, "dirSync", dirSync)
 	return sqlite3vfs.IOError
 }
 
 // Access tests for access permission. Returns true if the requested permission is available.
-// TODO, actually fulfil this. Probably check if we can get configmaps in the namespace?
 func (v *vfs) Access(name string, flags sqlite3vfs.AccessFlag) (bool, error) {
 	v.logger.Debugw("Access", "name", name, "flags", flags)
+	// Required because SQLITE3 fails with "unable to open database file: invalid argument" when it tries to read this when they're empty, and we return io.EOF
 	if strings.HasSuffix(name, "-wal") || strings.HasSuffix(name, "-journal") {
 		return false, nil
 	}
