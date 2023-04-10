@@ -4,7 +4,7 @@ import (
 
 	// "fmt"
 	"database/sql"
-	"fmt"
+	// "fmt"
 	"log"
 	"path/filepath"
 
@@ -12,7 +12,7 @@ import (
 
 	// "github.com/google/uuid"
 	"github.com/RichardoC/kube-sqlite3-vfs/pkg/vfs"
-	"github.com/google/uuid"
+	// "github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/psanford/sqlite3vfs"
 	"github.com/thought-machine/go-flags"
@@ -99,12 +99,12 @@ func main() {
 	// // file0 is the name of the file stored in kubernetes
 	// // The `vfs=kube-sqlite3-vfs` instructs sqlite to use the custom vfs implementation.
 	// // The name must match the name passed to `sqlite3vfs.RegisterVFS`
-	db, err := sql.Open("sqlite3", "file2.db?_journal=MEMORY&_cache_size=-128&vfs=kube-sqlite3-vfs")
+	db, err := sql.Open("sqlite3", "file2.db?_journal=MEMORY&_cache_size=-256&vfs=kube-sqlite3-vfs")
 	if err != nil {
 		logger.Panic(err)
 	}
 	defer db.Close()
-	db.SetMaxOpenConns(1)
+	// db.SetMaxOpenConns(1)
 
 	_, err = db.Exec("PRAGMA page_size=65536")
 	if err != nil {
@@ -136,6 +136,9 @@ func main() {
 		if err != nil {
 			logger.Error(err)
 		}
+		if (10 *i)%(totalToInsert) == 0{
+			logger.Warnf("inserted %d of %d", i, totalToInsert)
+		}
 	}
 
 	err = tx.Commit()
@@ -153,7 +156,10 @@ func main() {
 	err = rows.Scan(&count)
 	logger.Infof("Got %d rows of books with err %s", count, err)
 
-	rows, err = db.Query("SELECT * FROM books LIMIT 10")
+	// explicitly close out the old query since we only allow one at a time
+	rows.Close()
+
+	rows, err = db.Query("SELECT id, title FROM books LIMIT 100")
 	if err != nil {
 		logger.Panic(err)
 	}
@@ -167,7 +173,7 @@ func main() {
 			logger.Error(err)
 			continue
 		}
-		logger.Infof("ID: %d, Name: %s\n", id, name)
+		logger.Infof("ID: %s, Name: %s", id, name)
 
 	}
 }
