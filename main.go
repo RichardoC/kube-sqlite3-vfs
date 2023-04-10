@@ -111,14 +111,14 @@ func main() {
 		logger.Panic(err)
 	}
 
-	a, err := db.Exec(`CREATE TABLE IF NOT EXISTS books (
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS books (
 	id text NOT NULL PRIMARY KEY,
 	title text
 	)`)
 	if err != nil {
-		logger.Debug(a)
-		logger.Debug(a.LastInsertId())
-		logger.Debug(a.RowsAffected())
+		// logger.Debug(a)
+		// logger.Debug(a.LastInsertId())
+		// logger.Debug(a.RowsAffected())
 		logger.Panic(err)
 	}
 	tx, err := db.Begin()
@@ -136,7 +136,7 @@ func main() {
 		if err != nil {
 			logger.Error(err)
 		}
-		if (10 *i)%(totalToInsert) == 0{
+		if (10*i)%(totalToInsert) == 0 {
 			logger.Warnf("inserted %d of %d", i, totalToInsert)
 		}
 	}

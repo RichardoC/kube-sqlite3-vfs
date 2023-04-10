@@ -132,7 +132,8 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 	}
 	if off >= fileSize {
 		// Maybe this will stop it being unhappy about the journal file not existing?
-		err = sqlite3vfs.IOErrorShortRead
+		// err = sqlite3vfs.IOErrorShortRead
+		err = io.EOF
 		f.vfs.logger.Debugw("ReadAt", "off", off, "len(buffer)", len(p), "fileSize", fileSize, "err", err)
 		return 0, err
 	}
@@ -163,7 +164,7 @@ func (f *file) ReadAt(p []byte, off int64) (int, error) {
 
 	if n < len(p) {
 		f.vfs.logger.Error("Read too little")
-		return n, sqlite3vfs.IOErrorShortRead
+		return n, io.EOF
 	}
 
 	f.vfs.logger.Debugw("ReadAt read all expected bytes")
